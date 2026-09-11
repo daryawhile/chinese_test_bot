@@ -254,3 +254,28 @@ async def cmd_debug(message: Message) -> None:
             f"Проверьте вкладку Environment в Render. Убедитесь, что нет лишних пробелов.", 
             parse_mode="HTML"
         )
+@router.message(Command("testsave"))
+async def cmd_testsave(message: Message) -> None:
+    """Принудительно проверяет запись в JSONBin."""
+    await message.answer("⏳ Тестирую сохранение в облако... Подождите пару секунд.")
+    
+    user_id = str(message.from_user.id)
+    # Создаем тестовые данные
+    test_data = {
+        user_id: {
+            "test_lesson": {
+                "score": 99,
+                "total": 100,
+                "date": "TEST_MODE"
+            }
+        }
+    }
+    
+    # Пытаемся сохранить
+    await save_completed(test_data)
+    
+    await message.answer(
+        "✅ Команда выполнена!\n\n"
+        "Теперь <b>срочно</b> зайдите во вкладку <b>Logs</b> на Render.\n"
+        "Ищите строки, начинающиеся с '🔄', '✅' или '❌' рядом со словом JSONBin."
+    )
