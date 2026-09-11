@@ -1,4 +1,3 @@
-import asyncio
 import logging
 from flask import Flask, request, jsonify
 
@@ -12,18 +11,24 @@ from bot_logic import router
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 dp.include_router(router)
 
+# Создаем Flask-приложение
 app = Flask(__name__)
 
+# ВАЖНО: добавляем async перед def
 @app.route('/webhook', methods=['POST'])
-def webhook():
+async def webhook():
     try:
         update_data = request.json
         update = Update(**update_data)
-        asyncio.run(dp.feed_webhook_update(bot, update))
+        
+        # ВАЖНО: используем await вместо asyncio.run()
+        await dp.feed_webhook_update(bot, update)
+        
         return jsonify({"ok": True})
     except Exception as e:
         logger.error(f"Ошибка webhook: {e}", exc_info=True)
