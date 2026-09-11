@@ -147,7 +147,10 @@ async def format_results(user_id: int) -> str:
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
-        "🇨🇳 <b>Добро пожаловать!</b>\n\nЭто бот для проверки знаний китайского языка.\n⚠️ Каждый тест можно пройти <b>только один раз</b>.", 
+        "🇨🇳 <b>Добро пожаловать!</b>\n\n"
+        "Это бот для проверки знаний китайского языка.\n"
+        "💡 Вы можете проходить тесты <b>сколько угодно раз</b>!\n"
+        "В разделе «Мои результаты» всегда отображается ваш <b>последний</b> результат.", 
         reply_markup=build_main_keyboard(), 
         parse_mode="HTML"
     )
@@ -177,13 +180,20 @@ async def start_lesson(callback: CallbackQuery) -> None:
     lesson_id = callback.data.removeprefix("lesson_")
     user_id = callback.from_user.id
     
-    if lesson_id not in TESTS or await is_completed(user_id, lesson_id):
-        await callback.answer("✅ Вы уже прошли этот тест!", show_alert=True)
+    # Мы убрали проверку "await is_completed", теперь тест можно начать всегда
+    if lesson_id not in TESTS:
+        await callback.answer("Урок не найден.", show_alert=True)
         return
     
+    # Инициализируем сессию (это перезапишет старую, если она была)
     user_sessions[user_id] = {"lesson": lesson_id, "question": 0, "score": 0}
     q = TESTS[lesson_id]["questions"][0]
-    await callback.message.edit_text(format_question(lesson_id, 0), reply_markup=build_answer_keyboard(lesson_id, 0, q["options"]), parse_mode="HTML")
+    
+    await callback.message.edit_text(
+        format_question(lesson_id, 0), 
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"]), 
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
