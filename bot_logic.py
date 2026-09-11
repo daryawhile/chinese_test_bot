@@ -1,6 +1,7 @@
 import json
 from datetime import datetime
 from pathlib import Path
+from aiogram.filters import CommandStart, Command
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
@@ -114,7 +115,24 @@ def format_results(user_id: int) -> str:
             ["───────────────", f"📈 <b>Общая статистика:</b>", f"   Пройдено тестов: {completed_count}/{len(TESTS)}"])
     return "\n".join(lines)
 
-
+@router.message(Command("reset"))
+async def cmd_reset(message: Message) -> None:
+    """Сбрасывает результаты тестов для текущего пользователя."""
+    user_id = str(message.from_user.id)
+    data = load_completed()
+    
+    if user_id in data:
+        del data[user_id]
+        save_completed(data)
+        
+        # Также очищаем активную сессию, если она была
+        if message.from_user.id in user_sessions:
+            del user_sessions[message.from_user.id]
+            
+        await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>\n\nТеперь вы можете пройти все тесты заново.", parse_mode="HTML")
+    else:
+        await message.answer("У вас и так нет пройденных тестов. Можете смело начинать!", parse_mode="HTML")
+        
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
