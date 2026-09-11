@@ -1,5 +1,6 @@
 import os
 import json
+import logging
 import aiohttp
 from datetime import datetime
 
@@ -9,6 +10,10 @@ from aiogram.filters import CommandStart, Command
 
 from tests_data import TESTS
 from config import BOT_TOKEN
+
+# Настройка логирования для Render
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 router = Router()
 user_sessions: dict[int, dict] = {}
@@ -24,37 +29,42 @@ HEADERS = {"X-Master-Key": JSONBIN_API_KEY, "Content-Type": "application/json"} 
 
 async def load_completed() -> dict:
     if not JSONBIN_BIN_ID:
+        logger.warning("JSONBIN_BIN_ID не установлен, загрузка невозможна.")
         return {}
     try:
+        logger.info(f"🔄 Загружаем данные из JSONBin: {JSONBIN_BIN_ID}")
         async with aiohttp.ClientSession() as session:
             async with session.get(JSONBIN_URL + "/latest", headers=HEADERS) as resp:
                 if resp.status == 200:
                     data = await resp.json()
+                    logger.info("✅ Данные успешно загружены из JSONBin!")
                     return data.get("record", {})
+                else:
+                    logger.error(f"❌ Ошибка загрузки: статус {resp.status}")
     except Exception as e:
-        print(f"Ошибка загрузки из JSONBin: {e}")
+        logger.error(f"❌ Исключение при загрузке из JSONBin: {e}")
     return {}
 
 
 async def save_completed(data: dict) -> None:
     if not JSONBIN_BIN_ID:
-        print("❌ JSONBIN_BIN_ID не установлен!")
+        logger.error("❌ JSONBIN_BIN_ID не установлен!")
         return
     if not JSONBIN_API_KEY:
-        print("❌ JSONBIN_API_KEY не установлен!")
+        logger.error("❌ JSONBIN_API_KEY не установлен!")
         return
     
-    print(f"🔄 Сохраняем данные в JSONBin: {JSONBIN_BIN_ID}")
+    logger.info(f"🔄 Сохраняем данные в JSONBin: {JSONBIN_BIN_ID}")
     try:
         async with aiohttp.ClientSession() as session:
             async with session.put(JSONBIN_URL, json=data, headers=HEADERS) as resp:
                 if resp.status == 200:
-                    print("✅ Данные успешно сохранены в JSONBin!")
+                    logger.info("✅ Данные успешно сохранены в JSONBin!")
                 else:
                     text = await resp.text()
-                    print(f"❌ Ошибка сохранения в JSONBin: {resp.status} - {text}")
+                    logger.error(f"❌ Ошибка сохранения в JSONBin: {resp.status} - {text}")
     except Exception as e:
-        print(f"❌ Исключение при сохранении в JSONBin: {e}")
+        logger.error(f"❌ Исключение при сохранении в JSONBin: {e}")
 
 
 async def is_completed(user_id: int, lesson_id: str) -> bool:
@@ -221,7 +231,6 @@ async def handle_answer(callback: CallbackQuery) -> None:
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
-    """Сбрасывает результаты тестов для текущего пользователя."""
     user_id = str(message.from_user.id)
     data = await load_completed()
     
@@ -230,52 +239,31 @@ async def cmd_reset(message: Message) -> None:
         await save_completed(data)
         if message.from_user.id in user_sessions:
             del user_sessions[message.from_user.id]
-        await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>\n\nТеперь вы можете пройти все тесты заново.", parse_mode="HTML")
+        await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>", parse_mode="HTML")
     else:
-        await message.answer("У вас и так нет пройденных тестов. Можете смело начинать!", parse_mode="HTML")
+        await message.answer("У вас и так нет пройденных тестов.", parse_mode="HTML")
 
 
 @router.message(Command("debug"))
 async def cmd_debug(message: Message) -> None:
-    """Проверяет, видит ли бот ключи от JSONBin."""
     if JSONBIN_BIN_ID and JSONBIN_API_KEY:
-        await message.answer(
-            f"✅ <b>Отлично! Ключи найдены!</b>\n\n"
-            f"Bin ID: {JSONBIN_BIN_ID[:10]}...\n"
-            f"API Key: {JSONBIN_API_KEY[:10]}...\n\n"
-            f"Теперь результаты будут сохраняться в облаке.", 
-            parse_mode="HTML"
-        )
+        await message.answer(f"✅ Ключи найдены!\nBin ID: {JSONBIN_BIN_ID[:10]}...", parse_mode="HTML")
     else:
-        await message.answer(
-            f"❌ <b>ВНИМАНИЕ: Ключи НЕ найдены!</b>\n\n"
-            f"JSONBIN_BIN_ID: {'Есть' if JSONBIN_BIN_ID else 'ОТСУТСТВУЕТ'}\n"
-            f"JSONBIN_API_KEY: {'Есть' if JSONBIN_API_KEY else 'ОТСУТСТВУЕТ'}\n\n"
-            f"Проверьте вкладку Environment в Render. Убедитесь, что нет лишних пробелов.", 
-            parse_mode="HTML"
-        )
+        await message.answer("❌ Ключи НЕ найдены! Проверьте Environment в Render.", parse_mode="HTML")
+
+
 @router.message(Command("testsave"))
 async def cmd_testsave(message: Message) -> None:
-    """Принудительно проверяет запись в JSONBin."""
-    await message.answer("⏳ Тестирую сохранение в облако... Подождите пару секунд.")
+    logger.info("🚀 ЗАПУЩЕНА КОМАНДА /testsave")
+    await message.answer("⏳ Тестирую сохранение... Смотрите логи Render!")
     
     user_id = str(message.from_user.id)
-    # Создаем тестовые данные
     test_data = {
         user_id: {
-            "test_lesson": {
-                "score": 99,
-                "total": 100,
-                "date": "TEST_MODE"
-            }
+            "test_lesson": {"score": 99, "total": 100, "date": "TEST_MODE"}
         }
     }
     
-    # Пытаемся сохранить
     await save_completed(test_data)
-    
-    await message.answer(
-        "✅ Команда выполнена!\n\n"
-        "Теперь <b>срочно</b> зайдите во вкладку <b>Logs</b> на Render.\n"
-        "Ищите строки, начинающиеся с '🔄', '✅' или '❌' рядом со словом JSONBin."
-    )
+    logger.info("🏁 КОМАНДА /testsave ЗАВЕРШЕНА")
+    await message.answer("✅ Готово! Проверьте логи Render на наличие строк с 'JSONBin'.")
