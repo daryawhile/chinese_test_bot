@@ -1,6 +1,7 @@
 import os
 import json
 import logging
+import random
 import aiohttp
 from datetime import datetime
 
@@ -53,6 +54,10 @@ async def save_completed(data: dict) -> None:
     if not JSONBIN_API_KEY:
         logger.error("❌ JSONBIN_API_KEY не установлен!")
         return
+    
+    # Если словарь пустой, добавляем заполнитель, чтобы JSONBin не отверг его
+    if not data:
+        data = {"_cleared": True}
     
     logger.info(f"🔄 Сохраняем данные в JSONBin: {JSONBIN_BIN_ID}")
     try:
@@ -107,23 +112,26 @@ def build_answer_keyboard(lesson_id: str, q_index: int, options: list[str]) -> I
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def format_question(lesson_id: str, q_index: int) -> str:
+def format_question(lesson_id: str, q_index: int, q: dict, total: int) -> str:
     lesson = TESTS[lesson_id]
-    q = lesson["questions"][q_index]
-    return f"📖 <b>{lesson['title']}</b>\nВопрос {q_index + 1} из {len(lesson['questions'])}\n\n❓ {q['text']}"
+    return f"📖 <b>{lesson['title']}</b>\nВопрос {q_index + 1} из {total}\n\n❓ {q['text']}"
 
 
 async def format_results(user_id: int) -> str:
     results = await get_user_results(user_id)
-    if not results:
+    if not results or results == {"_cleared": True}:
         return "📊 <b>Ваши результаты</b>\n\nВы ещё не прошли ни одного теста.\n\nВыберите урок из списка, чтобы начать!"
     
     lines = ["📊 <b>Ваши результаты</b>\n"]
-    total_score, total_questions, completed_count = 0, 0, len(results)
+    total_score, total_questions, completed_count = 0, 0, 0
     
     for lesson_id, result in results.items():
+        if lesson_id == "_cleared":
+            continue
         lesson = TESTS.get(lesson_id)
-        if not lesson: continue
+        if not lesson: 
+            continue
+        completed_count += 1
         score, total, date = result.get("score", "?"), result.get("total", "?"), result.get("date", "неизвестно")
         
         if isinstance(score, int) and isinstance(total, int):
@@ -180,18 +188,34 @@ async def start_lesson(callback: CallbackQuery) -> None:
     lesson_id = callback.data.removeprefix("lesson_")
     user_id = callback.from_user.id
     
-    # Мы убрали проверку "await is_completed", теперь тест можно начать всегда
     if lesson_id not in TESTS:
         await callback.answer("Урок не найден.", show_alert=True)
         return
     
-    # Инициализируем сессию (это перезапишет старую, если она была)
-    user_sessions[user_id] = {"lesson": lesson_id, "question": 0, "score": 0}
-    q = TESTS[lesson_id]["questions"][0]
+    # Получаем вопросы и перемешиваем их порядок
+    questions = [q.copy() for q in TESTS[lesson_id]["questions"]]
+    random.shuffle(questions)
     
+    # Для каждого вопроса перемешиваем варианты ответов
+    for q in questions:
+        options_with_correct = [(opt, i == q["correct"]) for i, opt in enumerate(q["options"])]
+        random.shuffle(options_with_correct)
+        q["shuffled_options"] = [opt for opt, _ in options_with_correct]
+        q["shuffled_correct"] = next(i for i, (_, is_correct) in enumerate(options_with_correct) if is_correct)
+    
+    # Сохраняем перемешанные вопросы в сессии
+    user_sessions[user_id] = {
+        "lesson": lesson_id, 
+        "question": 0, 
+        "score": 0,
+        "shuffled_questions": questions
+    }
+    
+    q = questions[0]
+    total = len(questions)
     await callback.message.edit_text(
-        format_question(lesson_id, 0), 
-        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"]), 
+        format_question(lesson_id, 0, q, total), 
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["shuffled_options"]), 
         parse_mode="HTML"
     )
     await callback.answer()
@@ -209,21 +233,28 @@ async def handle_answer(callback: CallbackQuery) -> None:
         await callback.answer("⚠️ Неактуальный вопрос.", show_alert=True)
         return
 
-    lesson = TESTS[lesson_id]
-    question = lesson["questions"][q_index]
-    is_correct = option_index == question["correct"]
-    feedback = "✅ Правильно!" if is_correct else f"❌ Неправильно.\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
+    # Берем перемешанные вопросы из сессии
+    questions = session["shuffled_questions"]
+    question = questions[q_index]
+    total = len(questions)
+    
+    # Используем shuffled_correct вместо обычного correct
+    is_correct = option_index == question["shuffled_correct"]
+    feedback = "✅ Правильно!" if is_correct else f"❌ Неправильно.\nВерный ответ: <b>{question['shuffled_options'][question['shuffled_correct']]}</b>"
     
     if is_correct: 
         session["score"] += 1
         
     next_q = q_index + 1
-    total = len(lesson["questions"])
 
     if next_q < total:
         session["question"] = next_q
-        next_q_data = lesson["questions"][next_q]
-        await callback.message.edit_text(f"{feedback}\n\n{format_question(lesson_id, next_q)}", reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["options"]), parse_mode="HTML")
+        next_q_data = questions[next_q]
+        await callback.message.edit_text(
+            f"{feedback}\n\n{format_question(lesson_id, next_q, next_q_data, total)}", 
+            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["shuffled_options"]), 
+            parse_mode="HTML"
+        )
     else:
         score = session["score"]
         await mark_completed(user_id, lesson_id, score, total)
@@ -233,7 +264,7 @@ async def handle_answer(callback: CallbackQuery) -> None:
         percent = round(score / total * 100)
         emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
         await callback.message.edit_text(
-            f"{feedback}\n\n{emoji} <b>Тест завершён!</b>\n\n📖 {lesson['title']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\nЭтот тест отмечен как пройденный.\nВернитесь к списку уроков: /start", 
+            f"{feedback}\n\n{emoji} <b>Тест завершён!</b>\n\n📖 {TESTS[lesson_id]['title']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 Вы можете пройти этот тест снова, чтобы улучшить результат!\nВернитесь к списку уроков: /start", 
             parse_mode="HTML"
         )
     await callback.answer()
@@ -241,7 +272,7 @@ async def handle_answer(callback: CallbackQuery) -> None:
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
-    """Сбрасывает результаты тестов для текущего пользователя с диагностикой."""
+    """Сбрасывает результаты тестов для текущего пользователя."""
     user_id = str(message.from_user.id)
     logger.info(f"🔄 ЗАПРОС СБРОСА от пользователя ID: {user_id}")
     
@@ -256,10 +287,9 @@ async def cmd_reset(message: Message) -> None:
             del user_sessions[message.from_user.id]
         await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>\n\nТеперь вы можете пройти все тесты заново.", parse_mode="HTML")
     else:
-        logger.warning(f"⚠️ Пользователь {user_id} НЕ НАЙДЕН в базе. Сохраненные ID: {list(data.keys())}")
+        logger.warning(f"⚠️ Пользователь {user_id} НЕ НАЙДЕН в базе.")
         await message.answer(
             f"⚠️ Для этого аккаунта нет сохраненных результатов.\n\n"
-            f"(Ваш системный ID: `{user_id}`)\n"
             f"Пройдите тест, чтобы он сохранился!", 
             parse_mode="HTML"
         )
@@ -267,14 +297,26 @@ async def cmd_reset(message: Message) -> None:
 
 @router.message(Command("debug"))
 async def cmd_debug(message: Message) -> None:
+    """Проверяет, видит ли бот ключи от JSONBin."""
     if JSONBIN_BIN_ID and JSONBIN_API_KEY:
-        await message.answer(f"✅ Ключи найдены!\nBin ID: {JSONBIN_BIN_ID[:10]}...", parse_mode="HTML")
+        await message.answer(
+            f"✅ <b>Ключи найдены!</b>\n\n"
+            f"Bin ID: {JSONBIN_BIN_ID[:10]}...\n"
+            f"API Key: {JSONBIN_API_KEY[:10]}...", 
+            parse_mode="HTML"
+        )
     else:
-        await message.answer("❌ Ключи НЕ найдены! Проверьте Environment в Render.", parse_mode="HTML")
+        await message.answer(
+            f"❌ <b>Ключи НЕ найдены!</b>\n\n"
+            f"JSONBIN_BIN_ID: {'Есть' if JSONBIN_BIN_ID else 'ОТСУТСТВУЕТ'}\n"
+            f"JSONBIN_API_KEY: {'Есть' if JSONBIN_API_KEY else 'ОТСУТСТВУЕТ'}", 
+            parse_mode="HTML"
+        )
 
 
 @router.message(Command("testsave"))
 async def cmd_testsave(message: Message) -> None:
+    """Принудительно проверяет запись в JSONBin."""
     logger.info("🚀 ЗАПУЩЕНА КОМАНДА /testsave")
     await message.answer("⏳ Тестирую сохранение... Смотрите логи Render!")
     
@@ -287,4 +329,4 @@ async def cmd_testsave(message: Message) -> None:
     
     await save_completed(test_data)
     logger.info("🏁 КОМАНДА /testsave ЗАВЕРШЕНА")
-    await message.answer("✅ Готово! Проверьте логи Render на наличие строк с 'JSONBin'.")
+    await message.answer("✅ Готово! Проверьте логи Render.")
