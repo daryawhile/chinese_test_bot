@@ -1,5 +1,5 @@
 import logging
-from flask import Flask, request, jsonify
+from quart import Quart, request, jsonify
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -16,17 +16,17 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
 dp = Dispatcher()
 dp.include_router(router)
 
-# Создаем Flask-приложение
-app = Flask(__name__)
+# Создаем приложение Quart (вместо Flask)
+app = Quart(__name__)
 
-# ВАЖНО: добавляем async перед def
 @app.route('/webhook', methods=['POST'])
 async def webhook():
     try:
-        update_data = request.json
+        # В Quart нужно использовать await для получения JSON
+        update_data = await request.get_json()
         update = Update(**update_data)
         
-        # ВАЖНО: используем await вместо asyncio.run()
+        # Теперь await работает идеально и не закрывает цикл событий
         await dp.feed_webhook_update(bot, update)
         
         return jsonify({"ok": True})
@@ -35,5 +35,5 @@ async def webhook():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route('/', methods=['GET'])
-def health_check():
+async def health_check():
     return "Bot is running!", 200
