@@ -231,17 +231,28 @@ async def handle_answer(callback: CallbackQuery) -> None:
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
+    """Сбрасывает результаты тестов для текущего пользователя с диагностикой."""
     user_id = str(message.from_user.id)
+    logger.info(f"🔄 ЗАПРОС СБРОСА от пользователя ID: {user_id}")
+    
     data = await load_completed()
+    logger.info(f"📦 Текущие данные в JSONBin: {data}")
     
     if user_id in data:
+        logger.info(f"✅ Найден пользователь {user_id}, удаляем его данные.")
         del data[user_id]
         await save_completed(data)
         if message.from_user.id in user_sessions:
             del user_sessions[message.from_user.id]
-        await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>", parse_mode="HTML")
+        await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>\n\nТеперь вы можете пройти все тесты заново.", parse_mode="HTML")
     else:
-        await message.answer("У вас и так нет пройденных тестов.", parse_mode="HTML")
+        logger.warning(f"⚠️ Пользователь {user_id} НЕ НАЙДЕН в базе. Сохраненные ID: {list(data.keys())}")
+        await message.answer(
+            f"⚠️ Для этого аккаунта нет сохраненных результатов.\n\n"
+            f"(Ваш системный ID: `{user_id}`)\n"
+            f"Пройдите тест, чтобы он сохранился!", 
+            parse_mode="HTML"
+        )
 
 
 @router.message(Command("debug"))
