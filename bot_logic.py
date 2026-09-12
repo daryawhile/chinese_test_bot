@@ -241,7 +241,7 @@ async def noop(callback: CallbackQuery) -> None:
 
 # ─── ТЕСТЫ ────────────────────────────────────────────────────
 
-@router.callback_query(F.data.startswith("test_"))
+@router.callback_query(F.data.startswith("test_lesson_"))
 async def start_test(callback: CallbackQuery) -> None:
     lesson_id = callback.data.removeprefix("test_")
     user_id = callback.from_user.id
@@ -271,13 +271,13 @@ async def start_test(callback: CallbackQuery) -> None:
     total = len(questions)
     await callback.message.edit_text(
         f"📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос 1 из {total}\n\n❓ {q['text']}", 
-        reply_markup=build_answer_keyboard(lesson_id, 0, q["shuffled_options"], "test"), 
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["shuffled_options"], "testans"), 
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("test_"))
+@router.callback_query(F.data.startswith("testans_"))
 async def handle_test_answer(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     option_index, q_index = int(parts[-1]), int(parts[-2])
@@ -306,7 +306,7 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
         next_q_data = questions[next_q]
         await callback.message.edit_text(
             f"{feedback}\n\n📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {next_q_data['text']}", 
-            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["shuffled_options"], "test"), 
+            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["shuffled_options"], "testans"), 
             parse_mode="HTML"
         )
     else:
@@ -318,7 +318,7 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
         percent = round(score / total * 100)
         emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
         await callback.message.edit_text(
-            f"{feedback}\n\n{emoji} <b>Тест завершён!</b>\n\n📖 {TESTS[lesson_id]['title']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)", 
+            f"{feedback}\n\n{emoji} <b>Тест завершён!</b>\n\n📖 {TESTS[lesson_id]['title']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 Вы можете пройти этот тест снова, чтобы улучшить результат!", 
             reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]]),
             parse_mode="HTML"
         )
@@ -384,20 +384,20 @@ async def start_words(callback: CallbackQuery) -> None:
         "question": 0,
         "score": 0,
         "questions": questions,
-        "wrong_words": []  # Для повторения ошибок
+        "wrong_words": []
     }
     
     q = questions[0]
     total = len(questions)
     await callback.message.edit_text(
         f"🎴 <b>Урок {lesson_id.split('_')[1]}</b>\nВопрос 1 из {total}\n\n❓ {q['question_text']}", 
-        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"], "word"), 
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"], "wordans"), 
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("word_"))
+@router.callback_query(F.data.startswith("wordans_"))
 async def handle_word_answer(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     option_index, q_index = int(parts[-1]), int(parts[-2])
@@ -426,7 +426,7 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
     else:
         feedback = f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
         # Добавляем слово для повторения
-        correct_word = next(w for w in question["all_words"] if w[question["answer_type"]] == question["options"][question["correct"]])
+        correct_word = next(w for w in question["all_words"] if w[question["answer_type"]] == question['options'][question['correct']])
         session["wrong_words"].append(correct_word)
     
     words_text = "\n".join(words_info)
@@ -438,7 +438,7 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
         next_q_data = questions[next_q]
         await callback.message.edit_text(
             f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n🎴 <b>Урок {lesson_id.split('_')[1]}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {next_q_data['question_text']}", 
-            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["options"], "word"), 
+            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["options"], "wordans"), 
             parse_mode="HTML"
         )
     else:
@@ -451,8 +451,12 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
         # Предлагаем повторение ошибок, если они есть
         wrong_words = session.get("wrong_words", [])
         if wrong_words and len(wrong_words) > 0:
-                        await callback.message.edit_text(
-                f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n{emoji} <b>Изучение завершён!</b>\n\n🎴 Урок {lesson_id.split('_')[1']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 У вас есть слова с ошибками. Хотите повторить их?",
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔄 Повторить ошибки", callback_data=f"repeat_{lesson_id}")],
+                [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+            ])
+            await callback.message.edit_text(
+                f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n{emoji} <b>Изучение завершён!</b>\n\n🎴 Урок {lesson_id.split('_')[1]}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 У вас есть слова с ошибками. Хотите повторить их?",
                 reply_markup=keyboard,
                 parse_mode="HTML"
             )
