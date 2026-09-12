@@ -304,7 +304,8 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
 async def handle_test_next(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     next_q = int(parts[-1])
-    lesson_id = "_".join(parts[1:-1])
+    # ИСПРАВЛЕНО: берем элементы с 3-го по предпоследний, чтобы получить "lesson_1", а не "next_lesson_1"
+    lesson_id = "_".join(parts[2:-1])
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
 
@@ -463,7 +464,8 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
 async def handle_word_next(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     next_q = int(parts[-1])
-    lesson_id = "_".join(parts[1:-1])
+    # ИСПРАВЛЕНО: берем элементы с 3-го по предпоследний, чтобы получить "lesson_1", а не "next_lesson_1"
+    lesson_id = "_".join(parts[2:-1])
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
 
