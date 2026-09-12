@@ -3,13 +3,14 @@ import json
 import logging
 import random
 import aiohttp
+import re
 from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 
-from tests_data import TESTS
+from tests_data import TESTS, WORDS
 from config import BOT_TOKEN
 
 # Настройка логирования для Render
@@ -55,7 +56,6 @@ async def save_completed(data: dict) -> None:
         logger.error("❌ JSONBIN_API_KEY не установлен!")
         return
     
-    # Если словарь пустой, добавляем заполнитель, чтобы JSONBin не отверг его
     if not data:
         data = {"_cleared": True}
     
@@ -72,22 +72,19 @@ async def save_completed(data: dict) -> None:
         logger.error(f"❌ Исключение при сохранении в JSONBin: {e}")
 
 
-async def is_completed(user_id: int, lesson_id: str) -> bool:
-    data = await load_completed()
-    return lesson_id in data.get(str(user_id), {})
-
-
 async def get_user_results(user_id: int) -> dict:
     data = await load_completed()
     return data.get(str(user_id), {})
 
 
-async def mark_completed(user_id: int, lesson_id: str, score: int, total: int) -> None:
+async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, test_type: str = "test") -> None:
     data = await load_completed()
     key = str(user_id)
     if key not in data:
         data[key] = {}
-    data[key][lesson_id] = {
+    if test_type not in data[key]:
+        data[key][test_type] = {}
+    data[key][test_type][lesson_id] = {
         "score": score,
         "total": total,
         "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
@@ -95,70 +92,107 @@ async def mark_completed(user_id: int, lesson_id: str, score: int, total: int) -
     await save_completed(data)
 
 
+# ─── Парсер слов ──────────────────────────────────────────────
+
+def parse_word(word_str: str) -> dict:
+    """Парсит строку формата 'иероглиф [пиньинь] перевод'"""
+    match = re.match(r'^(.+?)\s*\[(.+?)\]\s*(.+)$', word_str)
+    if match:
+        return {
+            "hanzi": match.group(1).strip(),
+            "pinyin": match.group(2).strip(),
+            "translation": match.group(3).strip(),
+        }
+    return None
+
+
 # ─── Вспомогательные функции ──────────────────────────────────
 
 def build_main_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📊 Мои результаты", callback_data="show_results")],
-        [InlineKeyboardButton(text="───────────────", callback_data="noop")]
+        [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
+        [InlineKeyboardButton(text="🎴 Изучение слов", callback_data="show_words")],
+        [InlineKeyboardButton(text="📖 Словарь", callback_data="show_dictionary")],
     ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_tests_keyboard() -> InlineKeyboardMarkup:
+    buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]]
     for lesson_id, lesson in TESTS.items():
-        buttons.append([InlineKeyboardButton(text=lesson["title"], callback_data=f"lesson_{lesson_id}")])
+        buttons.insert(0, [InlineKeyboardButton(text=lesson["title"], callback_data=f"test_{lesson_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def build_answer_keyboard(lesson_id: str, q_index: int, options: list[str]) -> InlineKeyboardMarkup:
-    buttons = [[InlineKeyboardButton(text=opt, callback_data=f"ans_{lesson_id}_{q_index}_{i}")] for i, opt in enumerate(options)]
+def build_words_keyboard() -> InlineKeyboardMarkup:
+    buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]]
+    for lesson_id in WORDS.keys():
+        lesson_num = lesson_id.split("_")[1]
+        buttons.insert(0, [InlineKeyboardButton(text=f"Урок {lesson_num}", callback_data=f"words_{lesson_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
-def format_question(lesson_id: str, q_index: int, q: dict, total: int) -> str:
-    lesson = TESTS[lesson_id]
-    return f"📖 <b>{lesson['title']}</b>\nВопрос {q_index + 1} из {total}\n\n❓ {q['text']}"
+def build_dictionary_keyboard() -> InlineKeyboardMarkup:
+    buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]]
+    for lesson_id in WORDS.keys():
+        lesson_num = lesson_id.split("_")[1]
+        buttons.insert(0, [InlineKeyboardButton(text=f"Урок {lesson_num}", callback_data=f"dict_{lesson_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def build_answer_keyboard(lesson_id: str, q_index: int, options: list[str], prefix: str = "ans") -> InlineKeyboardMarkup:
+    buttons = [[InlineKeyboardButton(text=opt, callback_data=f"{prefix}_{lesson_id}_{q_index}_{i}")] for i, opt in enumerate(options)]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 async def format_results(user_id: int) -> str:
     results = await get_user_results(user_id)
     if not results or results == {"_cleared": True}:
-        return "📊 <b>Ваши результаты</b>\n\nВы ещё не прошли ни одного теста.\n\nВыберите урок из списка, чтобы начать!"
+        return "📊 <b>Ваши результаты</b>\n\nВы ещё не прошли ни одного теста.\n\nВыберите раздел, чтобы начать!"
     
     lines = ["📊 <b>Ваши результаты</b>\n"]
-    total_score, total_questions, completed_count = 0, 0, 0
     
-    for lesson_id, result in results.items():
-        if lesson_id == "_cleared":
-            continue
-        lesson = TESTS.get(lesson_id)
-        if not lesson: 
-            continue
-        completed_count += 1
-        score, total, date = result.get("score", "?"), result.get("total", "?"), result.get("date", "неизвестно")
-        
-        if isinstance(score, int) and isinstance(total, int):
-            percent = round(score / total * 100)
-            total_score += score
-            total_questions += total
+    # Статистика по тестам
+    test_results = results.get("test", {})
+    if test_results and test_results != {"_cleared": True}:
+        lines.append("📝 <b>Тесты:</b>")
+        for lesson_id, result in test_results.items():
+            if lesson_id == "_cleared":
+                continue
+            lesson = TESTS.get(lesson_id)
+            if not lesson:
+                continue
+            score, total, date = result.get("score", "?"), result.get("total", "?"), result.get("date", "неизвестно")
+            percent = round(score / total * 100) if isinstance(score, int) and isinstance(total, int) else 0
             emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
-            lines.append(f"{emoji} <b>{lesson['title']}</b>\n   Результат: {score}/{total} ({percent}%)\n   Дата: {date}\n")
-        else:
-            lines.append(f"✅ <b>{lesson['title']}</b>\n   Результат: {score}/{total}\n   Дата: {date}\n")
-
-    if total_questions > 0:
-        lines.extend(["───────────────", f"📈 <b>Общая статистика:</b>", f"   Пройдено тестов: {completed_count}/{len(TESTS)}", f"   Правильных ответов: {total_score}/{total_questions} ({round(total_score/total_questions*100)}%)"])
-    else:
-        lines.extend(["───────────────", f"📈 <b>Общая статистика:</b>", f"   Пройдено тестов: {completed_count}/{len(TESTS)}"])
+            lines.append(f"  {emoji} {lesson['title']}: {score}/{total} ({percent}%) - {date}")
+        lines.append("")
+    
+    # Статистика по изучению слов
+    words_results = results.get("words", {})
+    if words_results and words_results != {"_cleared": True}:
+        lines.append("🎴 <b>Изучение слов:</b>")
+        for lesson_id, result in words_results.items():
+            if lesson_id == "_cleared":
+                continue
+            lesson_num = lesson_id.split("_")[1]
+            score, total, date = result.get("score", "?"), result.get("total", "?"), result.get("date", "неизвестно")
+            percent = round(score / total * 100) if isinstance(score, int) and isinstance(total, int) else 0
+            emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+            lines.append(f"  {emoji} Урок {lesson_num}: {score}/{total} ({percent}%) - {date}")
+    
     return "\n".join(lines)
 
 
-# ─── Хендлеры (Обработчики команд) ────────────────────────────
+# ─── Хендлеры ─────────────────────────────────────────────────
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
     await message.answer(
         "🇨🇳 <b>Добро пожаловать!</b>\n\n"
-        "Это бот для проверки знаний китайского языка.\n"
-        "💡 Вы можете проходить тесты <b>сколько угодно раз</b>!\n"
-        "В разделе «Мои результаты» всегда отображается ваш <b>последний</b> результат.", 
+        "Это бот для изучения китайского языка.\n\n"
+        "💡 Вы можете проходить тесты и изучать слова сколько угодно раз!", 
         reply_markup=build_main_keyboard(), 
         parse_mode="HTML"
     )
@@ -167,14 +201,36 @@ async def cmd_start(message: Message) -> None:
 @router.callback_query(F.data == "show_results")
 async def show_results(callback: CallbackQuery) -> None:
     text = await format_results(callback.from_user.id)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад к урокам", callback_data="back_to_lessons")]])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]])
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
 
-@router.callback_query(F.data == "back_to_lessons")
-async def back_to_lessons(callback: CallbackQuery) -> None:
-    await callback.message.edit_text("🇨🇳 <b>Выберите урок:</b>", reply_markup=build_main_keyboard(), parse_mode="HTML")
+@router.callback_query(F.data == "show_tests")
+async def show_tests(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("📝 <b>Выберите тест:</b>", reply_markup=build_tests_keyboard(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "show_words")
+async def show_words(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("🎴 <b>Выберите урок для изучения слов:</b>", reply_markup=build_words_keyboard(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "show_dictionary")
+async def show_dictionary(callback: CallbackQuery) -> None:
+    await callback.message.edit_text("📖 <b>Выберите урок:</b>", reply_markup=build_dictionary_keyboard(), parse_mode="HTML")
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "🇨🇳 <b>Главное меню</b>\n\nВыберите раздел:", 
+        reply_markup=build_main_keyboard(), 
+        parse_mode="HTML"
+    )
     await callback.answer()
 
 
@@ -183,28 +239,28 @@ async def noop(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("lesson_"))
-async def start_lesson(callback: CallbackQuery) -> None:
-    lesson_id = callback.data.removeprefix("lesson_")
+# ─── ТЕСТЫ ────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("test_"))
+async def start_test(callback: CallbackQuery) -> None:
+    lesson_id = callback.data.removeprefix("test_")
     user_id = callback.from_user.id
     
     if lesson_id not in TESTS:
-        await callback.answer("Урок не найден.", show_alert=True)
+        await callback.answer("Тест не найден.", show_alert=True)
         return
     
-    # Получаем вопросы и перемешиваем их порядок
     questions = [q.copy() for q in TESTS[lesson_id]["questions"]]
     random.shuffle(questions)
     
-    # Для каждого вопроса перемешиваем варианты ответов
     for q in questions:
         options_with_correct = [(opt, i == q["correct"]) for i, opt in enumerate(q["options"])]
         random.shuffle(options_with_correct)
         q["shuffled_options"] = [opt for opt, _ in options_with_correct]
         q["shuffled_correct"] = next(i for i, (_, is_correct) in enumerate(options_with_correct) if is_correct)
     
-    # Сохраняем перемешанные вопросы в сессии
     user_sessions[user_id] = {
+        "type": "test",
         "lesson": lesson_id, 
         "question": 0, 
         "score": 0,
@@ -214,31 +270,29 @@ async def start_lesson(callback: CallbackQuery) -> None:
     q = questions[0]
     total = len(questions)
     await callback.message.edit_text(
-        format_question(lesson_id, 0, q, total), 
-        reply_markup=build_answer_keyboard(lesson_id, 0, q["shuffled_options"]), 
+        f"📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос 1 из {total}\n\n❓ {q['text']}", 
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["shuffled_options"], "test"), 
         parse_mode="HTML"
     )
     await callback.answer()
 
 
-@router.callback_query(F.data.startswith("ans_"))
-async def handle_answer(callback: CallbackQuery) -> None:
+@router.callback_query(F.data.startswith("test_"))
+async def handle_test_answer(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     option_index, q_index = int(parts[-1]), int(parts[-2])
     lesson_id = "_".join(parts[1:-2])
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
 
-    if not session or session["lesson"] != lesson_id or session["question"] != q_index:
+    if not session or session.get("type") != "test" or session["lesson"] != lesson_id or session["question"] != q_index:
         await callback.answer("⚠️ Неактуальный вопрос.", show_alert=True)
         return
 
-    # Берем перемешанные вопросы из сессии
     questions = session["shuffled_questions"]
     question = questions[q_index]
     total = len(questions)
     
-    # Используем shuffled_correct вместо обычного correct
     is_correct = option_index == question["shuffled_correct"]
     feedback = "✅ Правильно!" if is_correct else f"❌ Неправильно.\nВерный ответ: <b>{question['shuffled_options'][question['shuffled_correct']]}</b>"
     
@@ -251,24 +305,333 @@ async def handle_answer(callback: CallbackQuery) -> None:
         session["question"] = next_q
         next_q_data = questions[next_q]
         await callback.message.edit_text(
-            f"{feedback}\n\n{format_question(lesson_id, next_q, next_q_data, total)}", 
-            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["shuffled_options"]), 
+            f"{feedback}\n\n📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {next_q_data['text']}", 
+            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["shuffled_options"], "test"), 
             parse_mode="HTML"
         )
     else:
         score = session["score"]
-        await mark_completed(user_id, lesson_id, score, total)
+        await mark_completed(user_id, lesson_id, score, total, "test")
         if user_id in user_sessions:
             del user_sessions[user_id]
             
         percent = round(score / total * 100)
         emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
         await callback.message.edit_text(
-            f"{feedback}\n\n{emoji} <b>Тест завершён!</b>\n\n📖 {TESTS[lesson_id]['title']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 Вы можете пройти этот тест снова, чтобы улучшить результат!\nВернитесь к списку уроков: /start", 
+            f"{feedback}\n\n{emoji} <b>Тест завершён!</b>\n\n📖 {TESTS[lesson_id]['title']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)", 
+            reply_markup=InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]]),
             parse_mode="HTML"
         )
     await callback.answer()
 
+
+# ─── ИЗУЧЕНИЕ СЛОВ ────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("words_"))
+async def start_words(callback: CallbackQuery) -> None:
+    lesson_id = callback.data.removeprefix("words_")
+    user_id = callback.from_user.id
+    
+    if lesson_id not in WORDS:
+        await callback.answer("Урок не найден.", show_alert=True)
+        return
+    
+    words = [parse_word(w) for w in WORDS[lesson_id]]
+    words = [w for w in words if w is not None]
+    
+    if len(words) < 4:
+        await callback.answer("Недостаточно слов для теста.", show_alert=True)
+        return
+    
+    # Генерируем 10 случайных вопросов
+    questions = []
+    for _ in range(min(10, len(words))):
+        correct_word = random.choice(words)
+        question_type = random.choice(["hanzi", "pinyin", "translation"])
+        
+        # Определяем, что показываем в вопросе
+        if question_type == "hanzi":
+            question_text = correct_word["hanzi"]
+            answer_type = random.choice(["pinyin", "translation"])
+        elif question_type == "pinyin":
+            question_text = correct_word["pinyin"]
+            answer_type = random.choice(["hanzi", "translation"])
+        else:
+            question_text = correct_word["translation"]
+            answer_type = random.choice(["hanzi", "pinyin"])
+        
+        # Создаем варианты ответов
+        wrong_words = [w for w in words if w != correct_word]
+        random.shuffle(wrong_words)
+        wrong_words = wrong_words[:3]
+        
+        options = [correct_word[answer_type]] + [w[answer_type] for w in wrong_words]
+        random.shuffle(options)
+        correct_index = options.index(correct_word[answer_type])
+        
+        questions.append({
+            "question_text": question_text,
+            "question_type": question_type,
+            "answer_type": answer_type,
+            "options": options,
+            "correct": correct_index,
+            "all_words": [correct_word] + wrong_words,
+        })
+    
+    user_sessions[user_id] = {
+        "type": "words",
+        "lesson": lesson_id,
+        "question": 0,
+        "score": 0,
+        "questions": questions,
+        "wrong_words": []  # Для повторения ошибок
+    }
+    
+    q = questions[0]
+    total = len(questions)
+    await callback.message.edit_text(
+        f"🎴 <b>Урок {lesson_id.split('_')[1]}</b>\nВопрос 1 из {total}\n\n❓ {q['question_text']}", 
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"], "word"), 
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("word_"))
+async def handle_word_answer(callback: CallbackQuery) -> None:
+    parts = callback.data.split("_")
+    option_index, q_index = int(parts[-1]), int(parts[-2])
+    lesson_id = "_".join(parts[1:-2])
+    user_id = callback.from_user.id
+    session = user_sessions.get(user_id)
+
+    if not session or session.get("type") != "words" or session["lesson"] != lesson_id or session["question"] != q_index:
+        await callback.answer("⚠️ Неактуальный вопрос.", show_alert=True)
+        return
+
+    questions = session["questions"]
+    question = questions[q_index]
+    total = len(questions)
+    
+    is_correct = option_index == question["correct"]
+    
+    # Формируем информацию о всех словах
+    words_info = []
+    for word in question["all_words"]:
+        words_info.append(f"{word['hanzi']} [{word['pinyin']}] - {word['translation']}")
+    
+    if is_correct:
+        feedback = "✅ <b>Правильно!</b>"
+        session["score"] += 1
+    else:
+        feedback = f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
+        # Добавляем слово для повторения
+        correct_word = next(w for w in question["all_words"] if w[question["answer_type"]] == question["options"][question["correct"]])
+        session["wrong_words"].append(correct_word)
+    
+    words_text = "\n".join(words_info)
+    
+    next_q = q_index + 1
+
+    if next_q < total:
+        session["question"] = next_q
+        next_q_data = questions[next_q]
+        await callback.message.edit_text(
+            f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n🎴 <b>Урок {lesson_id.split('_')[1]}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {next_q_data['question_text']}", 
+            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["options"], "word"), 
+            parse_mode="HTML"
+        )
+    else:
+        score = session["score"]
+        await mark_completed(user_id, lesson_id, score, total, "words")
+        
+        percent = round(score / total * 100)
+        emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+        
+        # Предлагаем повторение ошибок, если они есть
+        wrong_words = session.get("wrong_words", [])
+        if wrong_words and len(wrong_words) > 0:
+                        await callback.message.edit_text(
+                f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n{emoji} <b>Изучение завершён!</b>\n\n🎴 Урок {lesson_id.split('_')[1']}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 У вас есть слова с ошибками. Хотите повторить их?",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        else:
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+            ])
+            await callback.message.edit_text(
+                f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n{emoji} <b>Изучение завершён!</b>\n\n🎴 Урок {lesson_id.split('_')[1]}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 Отличная работа! Все слова изучены верно.",
+                reply_markup=keyboard,
+                parse_mode="HTML"
+            )
+        
+        if user_id in user_sessions:
+            del user_sessions[user_id]
+    
+    await callback.answer()
+
+
+# ─── ПОВТОРЕНИЕ ОШИБОК ────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("repeat_"))
+async def start_repeat(callback: CallbackQuery) -> None:
+    lesson_id = callback.data.removeprefix("repeat_")
+    user_id = callback.from_user.id
+    session = user_sessions.get(user_id)
+    
+    # Берем слова с ошибками из предыдущей сессии
+    wrong_words = session.get("wrong_words", []) if session else []
+    
+    if not wrong_words:
+        await callback.answer("Нет слов для повторения.", show_alert=True)
+        return
+    
+    # Генерируем вопросы только по словам с ошибками
+    questions = []
+    for word in wrong_words:
+        question_type = random.choice(["hanzi", "pinyin", "translation"])
+        
+        if question_type == "hanzi":
+            question_text = word["hanzi"]
+            answer_type = random.choice(["pinyin", "translation"])
+        elif question_type == "pinyin":
+            question_text = word["pinyin"]
+            answer_type = random.choice(["hanzi", "translation"])
+        else:
+            question_text = word["translation"]
+            answer_type = random.choice(["hanzi", "pinyin"])
+        
+        # Берем 3 случайных слова из урока для неправильных ответов
+        all_words = [parse_word(w) for w in WORDS[lesson_id]]
+        all_words = [w for w in all_words if w is not None]
+        wrong_options = [w for w in all_words if w != word]
+        random.shuffle(wrong_options)
+        wrong_options = wrong_options[:3]
+        
+        options = [word[answer_type]] + [w[answer_type] for w in wrong_options]
+        random.shuffle(options)
+        correct_index = options.index(word[answer_type])
+        
+        questions.append({
+            "question_text": question_text,
+            "question_type": question_type,
+            "answer_type": answer_type,
+            "options": options,
+            "correct": correct_index,
+            "all_words": [word] + wrong_options,
+        })
+    
+    user_sessions[user_id] = {
+        "type": "repeat",
+        "lesson": lesson_id,
+        "question": 0,
+        "score": 0,
+        "questions": questions
+    }
+    
+    q = questions[0]
+    total = len(questions)
+    await callback.message.edit_text(
+        f"🔄 <b>Повторение ошибок</b>\nУрок {lesson_id.split('_')[1]}\nВопрос 1 из {total}\n\n❓ {q['question_text']}",
+        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"], "repeatans"),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("repeatans_"))
+async def handle_repeat_answer(callback: CallbackQuery) -> None:
+    parts = callback.data.split("_")
+    option_index, q_index = int(parts[-1]), int(parts[-2])
+    lesson_id = "_".join(parts[1:-2])
+    user_id = callback.from_user.id
+    session = user_sessions.get(user_id)
+
+    if not session or session.get("type") != "repeat" or session["lesson"] != lesson_id or session["question"] != q_index:
+        await callback.answer("⚠️ Неактуальный вопрос.", show_alert=True)
+        return
+
+    questions = session["questions"]
+    question = questions[q_index]
+    total = len(questions)
+    
+    is_correct = option_index == question["correct"]
+    
+    words_info = []
+    for word in question["all_words"]:
+        words_info.append(f"{word['hanzi']} [{word['pinyin']}] - {word['translation']}")
+    
+    if is_correct:
+        feedback = "✅ <b>Правильно!</b>"
+        session["score"] += 1
+    else:
+        feedback = f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
+    
+    words_text = "\n".join(words_info)
+    
+    next_q = q_index + 1
+
+    if next_q < total:
+        session["question"] = next_q
+        next_q_data = questions[next_q]
+        await callback.message.edit_text(
+            f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n🔄 <b>Повторение ошибок</b>\nУрок {lesson_id.split('_')[1]}\nВопрос {next_q + 1} из {total}\n\n❓ {next_q_data['question_text']}",
+            reply_markup=build_answer_keyboard(lesson_id, next_q, next_q_data["options"], "repeatans"),
+            parse_mode="HTML"
+        )
+    else:
+        score = session["score"]
+        
+        percent = round(score / total * 100)
+        emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+        ])
+        await callback.message.edit_text(
+            f"{feedback}\n\n📚 <b>Все слова из вариантов:</b>\n{words_text}\n\n{emoji} <b>Повторение завершено!</b>\n\n📊 Результат: <b>{score}/{total}</b> ({percent}%)",
+            reply_markup=keyboard,
+            parse_mode="HTML"
+        )
+        
+        if user_id in user_sessions:
+            del user_sessions[user_id]
+    
+    await callback.answer()
+
+
+# ─── СЛОВАРЬ ──────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("dict_"))
+async def show_dict_lesson(callback: CallbackQuery) -> None:
+    lesson_id = callback.data.removeprefix("dict_")
+    
+    if lesson_id not in WORDS:
+        await callback.answer("Урок не найден.", show_alert=True)
+        return
+    
+    words = WORDS[lesson_id]
+    lesson_num = lesson_id.split('_')[1]
+    
+    lines = [f"📖 <b>Урок {lesson_num} - Словарь</b>\n"]
+    for word_str in words:
+        parsed = parse_word(word_str)
+        if parsed:
+            lines.append(f"• {parsed['hanzi']} [{parsed['pinyin']}] - {parsed['translation']}")
+    
+    text = "\n".join(lines)
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Назад к урокам", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    await callback.answer()
+
+
+# ─── СЛУЖЕБНЫЕ КОМАНДЫ ────────────────────────────────────────
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
@@ -290,7 +653,7 @@ async def cmd_reset(message: Message) -> None:
         logger.warning(f"⚠️ Пользователь {user_id} НЕ НАЙДЕН в базе.")
         await message.answer(
             f"⚠️ Для этого аккаунта нет сохраненных результатов.\n\n"
-            f"Пройдите тест, чтобы он сохранился!", 
+            f"Пройдите тест, чтобы он сохранился!",
             parse_mode="HTML"
         )
 
@@ -302,14 +665,14 @@ async def cmd_debug(message: Message) -> None:
         await message.answer(
             f"✅ <b>Ключи найдены!</b>\n\n"
             f"Bin ID: {JSONBIN_BIN_ID[:10]}...\n"
-            f"API Key: {JSONBIN_API_KEY[:10]}...", 
+            f"API Key: {JSONBIN_API_KEY[:10]}...",
             parse_mode="HTML"
         )
     else:
         await message.answer(
             f"❌ <b>Ключи НЕ найдены!</b>\n\n"
             f"JSONBIN_BIN_ID: {'Есть' if JSONBIN_BIN_ID else 'ОТСУТСТВУЕТ'}\n"
-            f"JSONBIN_API_KEY: {'Есть' if JSONBIN_API_KEY else 'ОТСУТСТВУЕТ'}", 
+            f"JSONBIN_API_KEY: {'Есть' if JSONBIN_API_KEY else 'ОТСУТСТВУЕТ'}",
             parse_mode="HTML"
         )
 
@@ -323,7 +686,7 @@ async def cmd_testsave(message: Message) -> None:
     user_id = str(message.from_user.id)
     test_data = {
         user_id: {
-            "test_lesson": {"score": 99, "total": 100, "date": "TEST_MODE"}
+            "test": {"test_lesson": {"score": 99, "total": 100, "date": "TEST_MODE"}}
         }
     }
     
