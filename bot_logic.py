@@ -465,12 +465,11 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
 async def handle_word_next(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     next_q = int(parts[-1])
-    # ИСПРАВЛЕНО: берем элементы с 3-го по предпоследний, чтобы получить "lesson_1", а не "next_lesson_1"
-    lesson_id = "_".join(parts[2:-1])
+    topic_id = "_".join(parts[2:-1])
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
 
-    if not session or session.get("type") != "words" or session["lesson"] != lesson_id:
+    if not session or session.get("type") != "words" or session["lesson"] != topic_id:
         await callback.answer("⚠️ Сессия не найдена.", show_alert=True)
         return
 
@@ -478,10 +477,12 @@ async def handle_word_next(callback: CallbackQuery) -> None:
     q = questions[next_q]
     total = len(questions)
     session["question"] = next_q
+    
+    topic_title = WORDS[topic_id]["title"]
 
     await callback.message.edit_text(
-        f"🎴 <b>Урок {lesson_id.split('_')[1]}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {q['question_text']}", 
-        reply_markup=build_answer_keyboard(lesson_id, next_q, q["options"], "wordans"), 
+        f"🎴 <b>{topic_title}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {q['question_text']}", 
+        reply_markup=build_answer_keyboard(topic_id, next_q, q["options"], "wordans"), 
         parse_mode="HTML"
     )
     await callback.answer()
@@ -489,7 +490,7 @@ async def handle_word_next(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("word_finish_"))
 async def handle_word_finish(callback: CallbackQuery) -> None:
-    lesson_id = callback.data.removeprefix("word_finish_")
+    topic_id = callback.data.removeprefix("word_finish_")
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
 
@@ -499,17 +500,18 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
 
     score = session["score"]
     total = len(session["questions"])
-    await mark_completed(user_id, lesson_id, score, total, "words")
+    await mark_completed(user_id, topic_id, score, total, "words")
     
     if user_id in user_sessions:
         del user_sessions[user_id]
         
     percent = round(score / total * 100)
     emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+    topic_title = WORDS[topic_id]["title"]
     
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]])
     await callback.message.edit_text(
-        f"{emoji} <b>Изучение слов завершено!</b>\n\n🎴 Урок {lesson_id.split('_')[1]}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 Вы можете пройти этот урок снова!", 
+        f"{emoji} <b>Изучение слов завершено!</b>\n\n🎴 {topic_title}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)\n\n💡 Вы можете пройти эту тему снова!", 
         reply_markup=kb, parse_mode="HTML"
     )
     await callback.answer()
