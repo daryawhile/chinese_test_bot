@@ -126,17 +126,15 @@ def build_tests_keyboard() -> InlineKeyboardMarkup:
 
 def build_words_keyboard() -> InlineKeyboardMarkup:
     buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]]
-    for lesson_id in WORDS.keys():
-        lesson_num = lesson_id.split("_")[1]
-        buttons.insert(0, [InlineKeyboardButton(text=f"Урок {lesson_num}", callback_data=f"words_{lesson_id}")])
+    for topic_id, topic_data in WORDS.items():
+        buttons.insert(0, [InlineKeyboardButton(text=topic_data["title"], callback_data=f"words_{topic_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def build_dictionary_keyboard() -> InlineKeyboardMarkup:
     buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]]
-    for lesson_id in WORDS.keys():
-        lesson_num = lesson_id.split("_")[1]
-        buttons.insert(0, [InlineKeyboardButton(text=f"Урок {lesson_num}", callback_data=f"dict_{lesson_id}")])
+    for topic_id, topic_data in WORDS.items():
+        buttons.insert(0, [InlineKeyboardButton(text=topic_data["title"], callback_data=f"dict_{topic_id}")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -358,14 +356,17 @@ async def handle_test_finish(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("words_"))
 async def start_words(callback: CallbackQuery) -> None:
-    lesson_id = callback.data.removeprefix("words_")
+    topic_id = callback.data.removeprefix("words_")
     user_id = callback.from_user.id
     
-    if lesson_id not in WORDS:
-        await callback.answer("Урок не найден.", show_alert=True)
+    if topic_id not in WORDS:
+        await callback.answer("Тема не найдена.", show_alert=True)
         return
     
-    words = [parse_word(w) for w in WORDS[lesson_id]]
+    words_list = WORDS[topic_id]["words"]
+    topic_title = WORDS[topic_id]["title"]
+    
+    words = [parse_word(w) for w in words_list]
     words = [w for w in words if w is not None]
     
     if len(words) < 4:
@@ -401,14 +402,14 @@ async def start_words(callback: CallbackQuery) -> None:
         })
     
     user_sessions[user_id] = {
-        "type": "words", "lesson": lesson_id, "question": 0, "score": 0, "questions": questions
+        "type": "words", "lesson": topic_id, "question": 0, "score": 0, "questions": questions
     }
     
     q = questions[0]
     total = len(questions)
     await callback.message.edit_text(
-        f"🎴 <b>Урок {lesson_id.split('_')[1]}</b>\nВопрос 1 из {total}\n\n❓ {q['question_text']}", 
-        reply_markup=build_answer_keyboard(lesson_id, 0, q["options"], "wordans"), 
+        f"🎴 <b>{topic_title}</b>\nВопрос 1 из {total}\n\n❓ {q['question_text']}", 
+        reply_markup=build_answer_keyboard(topic_id, 0, q["options"], "wordans"), 
         parse_mode="HTML"
     )
     await callback.answer()
@@ -518,24 +519,24 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("dict_"))
 async def show_dict_lesson(callback: CallbackQuery) -> None:
-    lesson_id = callback.data.removeprefix("dict_")
+    topic_id = callback.data.removeprefix("dict_")
     
-    if lesson_id not in WORDS:
-        await callback.answer("Урок не найден.", show_alert=True)
+    if topic_id not in WORDS:
+        await callback.answer("Тема не найдена.", show_alert=True)
         return
     
-    words = WORDS[lesson_id]
-    lesson_num = lesson_id.split('_')[1]
+    words_list = WORDS[topic_id]["words"]
+    topic_title = WORDS[topic_id]["title"]
     
-    lines = [f"📖 <b>Урок {lesson_num} - Словарь</b>\n"]
-    for word_str in words:
+    lines = [f"📖 <b>{topic_title}</b>\n"]
+    for i, word_str in enumerate(words_list, 1):
         parsed = parse_word(word_str)
         if parsed:
-            lines.append(f"• {parsed['hanzi']} [{parsed['pinyin']}] - {parsed['translation']}")
+            lines.append(f"{i}. {parsed['hanzi']} [{parsed['pinyin']}] - {parsed['translation']}")
     
     text = "\n".join(lines)
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔙 Назад к урокам", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="🔙 Назад к темам", callback_data="show_dictionary")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
     ])
     
