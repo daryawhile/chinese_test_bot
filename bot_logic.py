@@ -84,11 +84,37 @@ async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, t
         data[key] = {}
     if test_type not in data[key]:
         data[key][test_type] = {}
-    data[key][test_type][lesson_id] = {
-        "score": score,
-        "total": total,
-        "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
-    }
+    
+    # Если это первое прохождение темы
+    if lesson_id not in data[key][test_type]:
+        data[key][test_type][lesson_id] = {
+            "best_score": score,
+            "best_total": total,
+            "last_score": score,
+            "last_total": total,
+            "attempts": 1,
+            "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+    else:
+        # Обновляем существующую запись
+        record = data[key][test_type][lesson_id]
+        
+        # Увеличиваем счётчик попыток
+        record["attempts"] = record.get("attempts", 1) + 1
+        
+        # Обновляем последний результат
+        record["last_score"] = score
+        record["last_total"] = total
+        record["date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # Обновляем лучший результат, если текущий лучше
+        current_percent = (score / total * 100) if total > 0 else 0
+        best_percent = (record["best_score"] / record["best_total"] * 100) if record["best_total"] > 0 else 0
+        
+        if current_percent > best_percent:
+            record["best_score"] = score
+            record["best_total"] = total
+    
     await save_completed(data)
 
 
@@ -150,29 +176,55 @@ async def format_results(user_id: int) -> str:
     
     lines = ["📊 <b>Ваши результаты</b>\n"]
     
+    # Статистика по тестам
     test_results = results.get("test", {})
     if test_results and test_results != {"_cleared": True}:
         lines.append("📝 <b>Тесты:</b>")
-        for lesson_id, result in test_results.items():
+        for lesson_id, record in test_results.items():
             if lesson_id == "_cleared": continue
             lesson = TESTS.get(lesson_id)
             if not lesson: continue
-            score, total, date = result.get("score", "?"), result.get("total", "?"), result.get("date", "неизвестно")
-            percent = round(score / total * 100) if isinstance(score, int) and isinstance(total, int) else 0
-            emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
-            lines.append(f"  {emoji} {lesson['title']}: {score}/{total} ({percent}%) - {date}")
+            
+            best_score = record.get("best_score", "?")
+            best_total = record.get("best_total", "?")
+            attempts = record.get("attempts", 1)
+            date = record.get("date", "неизвестно")
+            
+            if isinstance(best_score, int) and isinstance(best_total, int):
+                percent = round(best_score / best_total * 100)
+                emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+                lines.append(f"  {emoji} {lesson['title']}")
+                lines.append(f"     Лучший: {best_score}/{best_total} ({percent}%)")
+                lines.append(f"     Попыток: {attempts} | Последняя: {date}")
+            else:
+                lines.append(f"  ✅ {lesson['title']}")
+                lines.append(f"     Попыток: {attempts} | Последняя: {date}")
         lines.append("")
     
+    # Статистика по изучению слов
     words_results = results.get("words", {})
     if words_results and words_results != {"_cleared": True}:
         lines.append("🎴 <b>Изучение слов:</b>")
-        for lesson_id, result in words_results.items():
-            if lesson_id == "_cleared": continue
-            lesson_num = lesson_id.split("_")[1]
-            score, total, date = result.get("score", "?"), result.get("total", "?"), result.get("date", "неизвестно")
-            percent = round(score / total * 100) if isinstance(score, int) and isinstance(total, int) else 0
-            emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
-            lines.append(f"  {emoji} Урок {lesson_num}: {score}/{total} ({percent}%) - {date}")
+        for topic_id, record in words_results.items():
+            if topic_id == "_cleared": continue
+            topic_data = WORDS.get(topic_id)
+            if not topic_data: continue
+            
+            topic_title = topic_data["title"]
+            best_score = record.get("best_score", "?")
+            best_total = record.get("best_total", "?")
+            attempts = record.get("attempts", 1)
+            date = record.get("date", "неизвестно")
+            
+            if isinstance(best_score, int) and isinstance(best_total, int):
+                percent = round(best_score / best_total * 100)
+                emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+                lines.append(f"  {emoji} {topic_title}")
+                lines.append(f"     Лучший: {best_score}/{best_total} ({percent}%)")
+                lines.append(f"     Попыток: {attempts} | Последняя: {date}")
+            else:
+                lines.append(f"  ✅ {topic_title}")
+                lines.append(f"     Попыток: {attempts} | Последняя: {date}")
     
     return "\n".join(lines)
 
