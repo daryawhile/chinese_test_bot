@@ -54,29 +54,28 @@ async def update_user_setting(user_id: int, setting: str, value: any) -> None:
 
 # ─── Генерация аудио ──────────────────────────────────────────
 
-async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str) -> None:
-    """Отправляет аудио, если у пользователя включена настройка."""
+async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str) -> int | None:
+    """Отправляет аудио, если включено. Возвращает message_id голосового или None."""
     settings = await get_user_settings(user_id)
     if not settings.get("audio_enabled", False):
-        return
+        return None
     
-    # Проверяем, есть ли в тексте китайские иероглифы
     has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
     
     if has_chinese:
         try:
-            # Используем 'zh' для стандартного мандаринского (убирает варнинг)
             tts = gTTS(text=text, lang="zh")
             audio_buffer = io.BytesIO()
             tts.write_to_fp(audio_buffer)
             audio_buffer.seek(0)
             
-            # Оборачиваем в BufferedInputFile (требование aiogram 3)
             voice_file = BufferedInputFile(file=audio_buffer.read(), filename="audio.mp3")
-            
-            await bot.send_voice(chat_id=chat_id, voice=voice_file)
+            sent_message = await bot.send_voice(chat_id=chat_id, voice=voice_file)
+            return sent_message.message_id
         except Exception as e:
             logger.error(f"Ошибка генерации или отправки аудио: {e}")
+    
+    return None
 
 
 # ─── Асинхронные функции для работы с облаком ─────────────────
@@ -505,7 +504,9 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
         session["score"] += 1
         
     # Отправляем аудио правильного ответа, если включено
-    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_answer_text)
+    audio_msg_id = await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_answer_text)
+    if audio_msg_id:
+        session["audio_message_id"] = audio_msg_id
         
     next_q = q_index + 1
 
@@ -544,6 +545,14 @@ async def handle_test_next(callback: CallbackQuery) -> None:
     q = questions[next_q]
     total = len(questions)
     session["question"] = next_q
+
+    # Удаляем предыдущее голосовое сообщение, если оно было
+    audio_msg_id = session.pop("audio_message_id", None)
+    if audio_msg_id:
+        try:
+            await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
+        except Exception:
+            pass
 
     await callback.message.edit_text(
         f"📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос {next_q + 1} из {total}\n\n❓ {q['text']}", 
@@ -671,7 +680,9 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
         session["score"] += 1
     
     # Отправляем аудио иероглифа правильного слова
-    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
+    audio_msg_id = await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
+    if audio_msg_id:
+        session["audio_message_id"] = audio_msg_id
     
     # Формируем разбор только для правильного слова
     word_breakdown = f"💡 <b>Разбор слова:</b>\n{correct_word['hanzi']} [{correct_word['pinyin']}] — {correct_word['translation']}"
@@ -713,6 +724,14 @@ async def handle_word_next(callback: CallbackQuery) -> None:
     q = questions[next_q]
     total = len(questions)
     session["question"] = next_q
+    
+    # Удаляем предыдущее голосовое сообщение, если оно было
+    audio_msg_id = session.pop("audio_message_id", None)
+    if audio_msg_id:
+        try:
+            await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
+        except Exception:
+            pass
     
     topic_title = WORDS[topic_id]["title"]
 
