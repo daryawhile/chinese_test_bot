@@ -547,7 +547,7 @@ async def handle_test_next(callback: CallbackQuery) -> None:
     session["question"] = next_q
 
     # Удаляем предыдущее голосовое сообщение, если оно было
-    audio_msg_id = session.pop("audio_message_id", None)
+    audio_msg_id = session.pop("audio_message_id", None)  # <-- ЕДИНСТВЕННОЕ ЧИСЛО
     if audio_msg_id:
         try:
             await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
@@ -576,8 +576,8 @@ async def handle_test_finish(callback: CallbackQuery) -> None:
     total = len(session["shuffled_questions"])
     await mark_completed(user_id, lesson_id, score, total, "test")
     
-    # Удаляем последнее голосовое сообщение, если оно было
-    audio_msg_id = session.pop("audio_message_id", None)
+    # Удаляем предыдущее голосовое сообщение, если оно было
+    audio_msg_id = session.pop("audio_message_id", None)  # <-- ЕДИНСТВЕННОЕ ЧИСЛО
     if audio_msg_id:
         try:
             await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
@@ -690,8 +690,10 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
     if is_correct: 
         session["score"] += 1
     
-    # Отправляем аудио иероглифа правильного слова
-    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
+        # Отправляем аудио иероглифа правильного слова
+    audio_msg_id = await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
+    if audio_msg_id:
+        session["audio_message_id"] = audio_msg_id
     
     # Формируем разбор
     if is_correct:
@@ -741,7 +743,7 @@ async def handle_word_next(callback: CallbackQuery) -> None:
     session["question"] = next_q
     
     # Удаляем предыдущее голосовое сообщение, если оно было
-    audio_msg_id = session.pop("audio_message_id", None)
+    audio_msg_id = session.pop("audio_message_id", None)  # <-- ЕДИНСТВЕННОЕ ЧИСЛО
     if audio_msg_id:
         try:
             await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
@@ -772,8 +774,8 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
     total = len(session["questions"])
     await mark_completed(user_id, topic_id, score, total, "words")
     
-    # Удаляем последнее голосовое сообщение, если оно было
-    audio_msg_id = session.pop("audio_message_id", None)
+    # Удаляем предыдущее голосовое сообщение, если оно было
+    audio_msg_id = session.pop("audio_message_id", None)  # <-- ЕДИНСТВЕННОЕ ЧИСЛО
     if audio_msg_id:
         try:
             await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
