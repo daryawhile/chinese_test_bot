@@ -10,6 +10,8 @@ from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import CommandStart, Command
 
+from aiogram.exceptions import TelegramBadRequest
+
 from tests_data import TESTS, WORDS
 from config import BOT_TOKEN
 
@@ -245,7 +247,16 @@ async def cmd_start(message: Message) -> None:
 async def show_results(callback: CallbackQuery) -> None:
     text = await format_results(callback.from_user.id)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]])
-    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
+    except TelegramBadRequest as e:
+        # Если ошибка именно в том, что сообщение не изменилось, мы её просто игнорируем
+        if "message is not modified" in str(e):
+            pass
+        else:
+            raise  # Любые другие ошибки пробрасываем дальше
+            
     await callback.answer()
 
 @router.callback_query(F.data == "show_tests")
