@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent, BufferedInputFile
 from aiogram.filters import CommandStart, Command
 from aiogram.exceptions import TelegramBadRequest
 from gtts import gTTS
@@ -76,10 +76,20 @@ async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str)
     
     if has_chinese:
         try:
-            audio_buffer = generate_audio_sync(text)
-            await bot.send_voice(chat_id, audio_buffer)
+            # Генерируем аудио (используем zh-CN, как рекомендует библиотека)
+            tts = gTTS(text=text, lang="zh-CN")
+            audio_buffer = io.BytesIO()
+            tts.write_to_fp(audio_buffer)
+            audio_buffer.seek(0)
+            
+            # Оборачиваем BytesIO в BufferedInputFile (требование aiogram 3)
+            voice_file = BufferedInputFile(file=audio_buffer.read(), filename="audio.mp3")
+            
+            # Отправляем голосовое сообщение
+            await bot.send_voice(chat_id=chat_id, voice=voice_file)
+            
         except Exception as e:
-            logger.error(f"Ошибка генерации аудио: {e}")
+            logger.error(f"Ошибка генерации или отправки аудио: {e}")
 
 
 # ─── Асинхронные функции для работы с облаком ─────────────────
