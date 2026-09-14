@@ -576,6 +576,14 @@ async def handle_test_finish(callback: CallbackQuery) -> None:
     total = len(session["shuffled_questions"])
     await mark_completed(user_id, lesson_id, score, total, "test")
     
+    # Удаляем последнее голосовое сообщение, если оно было
+    audio_msg_id = session.pop("audio_message_id", None)
+    if audio_msg_id:
+        try:
+            await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
+        except Exception:
+            pass
+    
     if user_id in user_sessions:
         del user_sessions[user_id]
         
@@ -671,21 +679,29 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
     
     is_correct = option_index == question["correct"]
     
-    # Находим правильное слово из списка all_words
+    # Находим правильное слово
     correct_word = next(w for w in question["all_words"] if w[question["answer_type"]] == question["options"][question["correct"]])
     
-    feedback = "✅ <b>Правильно!</b>" if is_correct else f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
+    # Находим слово, которое выбрал пользователь
+    selected_word = next(w for w in question["all_words"] if w[question["answer_type"]] == question["options"][option_index])
+    
+    feedback = "✅ <b>Правильно!</b>" if is_correct else f"❌ <b>Неправильно.</b>\nВаш ответ: <b>{question['options'][option_index]}</b>\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
     
     if is_correct: 
         session["score"] += 1
     
     # Отправляем аудио иероглифа правильного слова
-    audio_msg_id = await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
-    if audio_msg_id:
-        session["audio_message_id"] = audio_msg_id
+    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
     
-    # Формируем разбор только для правильного слова
-    word_breakdown = f"💡 <b>Разбор слова:</b>\n{correct_word['hanzi']} [{correct_word['pinyin']}] — {correct_word['translation']}"
+    # Формируем разбор
+    if is_correct:
+        word_breakdown = f"💡 <b>Разбор слова:</b>\n{correct_word['hanzi']} [{correct_word['pinyin']}] — {correct_word['translation']}"
+    else:
+        word_breakdown = (
+            f"💡 <b>Разбор слов:</b>\n\n"
+            f"❌ <b>Ваш ответ:</b>\n{selected_word['hanzi']} [{selected_word['pinyin']}] — {selected_word['translation']}\n\n"
+            f"✅ <b>Правильный ответ:</b>\n{correct_word['hanzi']} [{correct_word['pinyin']}] — {correct_word['translation']}"
+        )
     
     next_q = q_index + 1
 
@@ -706,7 +722,6 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
             reply_markup=kb, parse_mode="HTML"
         )
     await callback.answer()
-
 
 @router.callback_query(F.data.startswith("word_next_"))
 async def handle_word_next(callback: CallbackQuery) -> None:
@@ -756,6 +771,14 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
     score = session["score"]
     total = len(session["questions"])
     await mark_completed(user_id, topic_id, score, total, "words")
+    
+    # Удаляем последнее голосовое сообщение, если оно было
+    audio_msg_id = session.pop("audio_message_id", None)
+    if audio_msg_id:
+        try:
+            await callback.bot.delete_message(chat_id=callback.message.chat.id, message_id=audio_msg_id)
+        except Exception:
+            pass
     
     if user_id in user_sessions:
         del user_sessions[user_id]
