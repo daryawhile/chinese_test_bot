@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent
 from aiogram.filters import CommandStart, Command
 from aiogram.exceptions import TelegramBadRequest
 from gtts import gTTS
