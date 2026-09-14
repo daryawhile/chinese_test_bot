@@ -36,14 +36,12 @@ HEADERS = {"X-Master-Key": JSONBIN_API_KEY, "Content-Type": "application/json"} 
 # ─── Функции для работы с настройками пользователя ────────────
 
 async def get_user_settings(user_id: int) -> dict:
-    """Получает настройки пользователя."""
     data = await load_completed()
     user_data = data.get(str(user_id), {})
     return user_data.get("settings", {"audio_enabled": False})
 
 
 async def update_user_setting(user_id: int, setting: str, value: any) -> None:
-    """Обновляет одну настройку пользователя."""
     data = await load_completed()
     key = str(user_id)
     if key not in data:
@@ -56,15 +54,6 @@ async def update_user_setting(user_id: int, setting: str, value: any) -> None:
 
 # ─── Генерация аудио ──────────────────────────────────────────
 
-def generate_audio_sync(text: str) -> io.BytesIO:
-    """Синхронная генерация аудио из текста на китайском."""
-    tts = gTTS(text=text, lang="zh-cn")
-    audio_buffer = io.BytesIO()
-    tts.write_to_fp(audio_buffer)
-    audio_buffer.seek(0)
-    return audio_buffer
-
-
 async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str) -> None:
     """Отправляет аудио, если у пользователя включена настройка."""
     settings = await get_user_settings(user_id)
@@ -76,18 +65,16 @@ async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str)
     
     if has_chinese:
         try:
-            # Генерируем аудио (используем zh-CN, как рекомендует библиотека)
-            tts = gTTS(text=text, lang="zh-CN")
+            # Используем 'zh' для стандартного мандаринского (убирает варнинг)
+            tts = gTTS(text=text, lang="zh")
             audio_buffer = io.BytesIO()
             tts.write_to_fp(audio_buffer)
             audio_buffer.seek(0)
             
-            # Оборачиваем BytesIO в BufferedInputFile (требование aiogram 3)
+            # Оборачиваем в BufferedInputFile (требование aiogram 3)
             voice_file = BufferedInputFile(file=audio_buffer.read(), filename="audio.mp3")
             
-            # Отправляем голосовое сообщение
             await bot.send_voice(chat_id=chat_id, voice=voice_file)
-            
         except Exception as e:
             logger.error(f"Ошибка генерации или отправки аудио: {e}")
 
@@ -347,7 +334,7 @@ async def show_settings(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
         "⚙️ <b>Настройки</b>\n\n"
         "🔊 <b>Озвучка слов</b>\n"
-        "Если включено, бот будет автоматически отправлять голосовое сообщение с произношением иероглифа при каждом вопросе.\n\n"
+        "Если включено, бот будет отправлять голосовое сообщение с произношением правильного ответа сразу после вашего выбора.\n\n"
         f"Текущий статус: {audio_status}",
         reply_markup=kb,
         parse_mode="HTML"
@@ -366,8 +353,6 @@ async def toggle_audio(callback: CallbackQuery) -> None:
     
     status_text = "✅ Включено" if new_status else "❌ Выключено"
     await callback.answer(f"Озвучка слов: {status_text}", show_alert=True)
-    
-    # Обновляем экран настроек
     await show_settings(callback)
 
 
@@ -415,7 +400,6 @@ async def handle_search_input(message: Message) -> None:
         return
     
     query = message.text.strip().lower()
-    
     if not query:
         await message.answer("⚠️ Введите слово для поиска.")
         return
@@ -426,14 +410,10 @@ async def handle_search_input(message: Message) -> None:
             parsed = parse_word(word_str)
             if not parsed:
                 continue
-            
             if (query in parsed["hanzi"].lower() or 
                 query in parsed["pinyin"].lower() or 
                 query in parsed["translation"].lower()):
-                found_words.append({
-                    "topic": topic_data["title"],
-                    "word": parsed
-                })
+                found_words.append({"topic": topic_data["title"], "word": parsed})
     
     if user_id in user_sessions:
         del user_sessions[user_id]
@@ -445,8 +425,7 @@ async def handle_search_input(message: Message) -> None:
         ])
         await message.answer(
             "😔 <b>Слово не найдено</b>\n\n"
-            "Проверьте правильность ввода или возможно это слово мы ещё не изучали.\n\n"
-            "Попробуйте поискать в разделе <b>📖 Словарь</b>.",
+            "Проверьте правильность ввода или возможно это слово мы ещё не изучали.",
             reply_markup=kb,
             parse_mode="HTML"
         )
@@ -464,7 +443,6 @@ async def handle_search_input(message: Message) -> None:
         [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="search_word")],
         [InlineKeyboardButton(text="🔙 К словарю", callback_data="show_dictionary")]
     ])
-    
     await message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
 
 
@@ -499,10 +477,6 @@ async def start_test(callback: CallbackQuery) -> None:
         reply_markup=build_answer_keyboard(lesson_id, 0, q["shuffled_options"], "testans"), 
         parse_mode="HTML"
     )
-    
-    # Отправляем аудио, если включено
-    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, q['text'])
-    
     await callback.answer()
 
 
@@ -523,10 +497,15 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
     total = len(questions)
     
     is_correct = option_index == question["shuffled_correct"]
-    feedback = "✅ <b>Правильно!</b>" if is_correct else f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{question['shuffled_options'][question['shuffled_correct']]}</b>"
+    correct_answer_text = question["shuffled_options"][question["shuffled_correct"]]
+    
+    feedback = "✅ <b>Правильно!</b>" if is_correct else f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{correct_answer_text}</b>"
     
     if is_correct: 
         session["score"] += 1
+        
+    # Отправляем аудио правильного ответа, если включено
+    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_answer_text)
         
     next_q = q_index + 1
 
@@ -535,7 +514,7 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
             InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data=f"test_next_{lesson_id}_{next_q}")
         ]])
         await callback.message.edit_text(
-            f"{feedback}\n\n📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос {q_index + 1} из {total} завершён.\n\nНажмите кнопку ниже, чтобы продолжить.", 
+            f"{feedback}\n\n💡 <b>Правильный ответ:</b>\n{correct_answer_text}\n\nНажмите кнопку ниже, чтобы продолжить.", 
             reply_markup=kb, parse_mode="HTML"
         )
     else:
@@ -543,7 +522,7 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
             InlineKeyboardButton(text="🏁 Показать результаты", callback_data=f"test_finish_{lesson_id}")
         ]])
         await callback.message.edit_text(
-            f"{feedback}\n\n📖 <b>{TESTS[lesson_id]['title']}</b>\nВопрос {q_index + 1} из {total} завершён.\n\nНажмите кнопку ниже, чтобы увидеть результаты.", 
+            f"{feedback}\n\n💡 <b>Правильный ответ:</b>\n{correct_answer_text}\n\nНажмите кнопку ниже, чтобы увидеть результаты.", 
             reply_markup=kb, parse_mode="HTML"
         )
     await callback.answer()
@@ -571,10 +550,6 @@ async def handle_test_next(callback: CallbackQuery) -> None:
         reply_markup=build_answer_keyboard(lesson_id, next_q, q["shuffled_options"], "testans"), 
         parse_mode="HTML"
     )
-    
-    # Отправляем аудио, если включено
-    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, q['text'])
-    
     await callback.answer()
 
 
@@ -666,11 +641,6 @@ async def start_words(callback: CallbackQuery) -> None:
         reply_markup=build_answer_keyboard(topic_id, 0, q["options"], "wordans"), 
         parse_mode="HTML"
     )
-    
-    # Отправляем аудио иероглифа, если включено
-    if q["question_type"] == "hanzi":
-        await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, q['question_text'])
-    
     await callback.answer()
 
 
@@ -691,13 +661,20 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
     total = len(questions)
     
     is_correct = option_index == question["correct"]
+    
+    # Находим правильное слово из списка all_words
+    correct_word = next(w for w in question["all_words"] if w[question["answer_type"]] == question["options"][question["correct"]])
+    
     feedback = "✅ <b>Правильно!</b>" if is_correct else f"❌ <b>Неправильно.</b>\nВерный ответ: <b>{question['options'][question['correct']]}</b>"
     
     if is_correct: 
         session["score"] += 1
     
-    words_info = [f"{word['hanzi']} [{word['pinyin']}] - {word['translation']}" for word in question["all_words"]]
-    words_text = "\n".join(words_info)
+    # Отправляем аудио иероглифа правильного слова
+    await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, correct_word["hanzi"])
+    
+    # Формируем разбор только для правильного слова
+    word_breakdown = f"💡 <b>Разбор слова:</b>\n{correct_word['hanzi']} [{correct_word['pinyin']}] — {correct_word['translation']}"
     
     next_q = q_index + 1
 
@@ -706,7 +683,7 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
             InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data=f"word_next_{topic_id}_{next_q}")
         ]])
         await callback.message.edit_text(
-            f"{feedback}\n\n📚 <b>Разбор слов из вариантов:</b>\n{words_text}\n\nНажмите кнопку ниже, чтобы продолжить.", 
+            f"{feedback}\n\n{word_breakdown}\n\nНажмите кнопку ниже, чтобы продолжить.", 
             reply_markup=kb, parse_mode="HTML"
         )
     else:
@@ -714,7 +691,7 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
             InlineKeyboardButton(text="🏁 Показать результаты", callback_data=f"word_finish_{topic_id}")
         ]])
         await callback.message.edit_text(
-            f"{feedback}\n\n📚 <b>Разбор слов из вариантов:</b>\n{words_text}\n\nНажмите кнопку ниже, чтобы увидеть результаты.", 
+            f"{feedback}\n\n{word_breakdown}\n\nНажмите кнопку ниже, чтобы увидеть результаты.", 
             reply_markup=kb, parse_mode="HTML"
         )
     await callback.answer()
@@ -744,11 +721,6 @@ async def handle_word_next(callback: CallbackQuery) -> None:
         reply_markup=build_answer_keyboard(topic_id, next_q, q["options"], "wordans"), 
         parse_mode="HTML"
     )
-    
-    # Отправляем аудио иероглифа, если включено
-    if q["question_type"] == "hanzi":
-        await send_audio_if_enabled(callback.bot, callback.message.chat.id, user_id, q['question_text'])
-    
     await callback.answer()
 
 
@@ -816,67 +788,46 @@ async def show_dict_lesson(callback: CallbackQuery) -> None:
 async def cmd_set_admin(message: Message) -> None:
     user_id = message.from_user.id
     admin_users.add(user_id)
-    await message.answer(
-        "✅ <b>Режим администратора включён!</b>\n\n"
-        "Теперь вам доступна команда /admin_stats\n\n"
-        "Для отключения используйте /setuser1234",
-        parse_mode="HTML"
-    )
-
+    await message.answer("✅ <b>Режим администратора включён!</b>\n\nТеперь вам доступна команда /admin_stats\n\nДля отключения используйте /setuser1234", parse_mode="HTML")
 
 @router.message(Command("setuser1234"))
 async def cmd_set_user(message: Message) -> None:
     user_id = message.from_user.id
     if user_id in admin_users:
         admin_users.remove(user_id)
-    await message.answer(
-        "✅ <b>Режим администратора выключен.</b>\n\n"
-        "Теперь вы обычный пользователь.\n\n"
-        "Для включения используйте /setadmin1234",
-        parse_mode="HTML"
-    )
-
+    await message.answer("✅ <b>Режим администратора выключен.</b>\n\nТеперь вы обычный пользователь.\n\nДля включения используйте /setadmin1234", parse_mode="HTML")
 
 @router.message(Command("admin_stats"))
 async def cmd_admin_stats(message: Message) -> None:
     user_id = message.from_user.id
-    
     if user_id not in admin_users:
-        await message.answer("⛔ У вас нет доступа к этой команде.\n\nИспользуйте /setadmin1234 для включения режима администратора.")
+        await message.answer("⛔ У вас нет доступа к этой команде.\n\nИспользуйте /setadmin1234 для включения режима администратора.", parse_mode="HTML")
         return
     
     data = await load_completed()
-    
     total_users = len([k for k in data.keys() if k != "_cleared"])
     total_tests_completed = 0
     total_words_completed = 0
     topic_stats = {}
     
     for uid, user_data in data.items():
-        if uid == "_cleared":
-            continue
+        if uid == "_cleared": continue
         
         test_results = user_data.get("test", {})
         for lesson_id, record in test_results.items():
-            if lesson_id == "_cleared":
-                continue
+            if lesson_id == "_cleared": continue
             total_tests_completed += record.get("attempts", 1)
-            
             lesson = TESTS.get(lesson_id)
             if lesson:
-                topic_name = lesson["title"]
-                topic_stats[topic_name] = topic_stats.get(topic_name, 0) + record.get("attempts", 1)
+                topic_stats[lesson["title"]] = topic_stats.get(lesson["title"], 0) + record.get("attempts", 1)
         
         words_results = user_data.get("words", {})
         for topic_id, record in words_results.items():
-            if topic_id == "_cleared":
-                continue
+            if topic_id == "_cleared": continue
             total_words_completed += record.get("attempts", 1)
-            
             topic_data = WORDS.get(topic_id)
             if topic_data:
-                topic_name = topic_data["title"]
-                topic_stats[topic_name] = topic_stats.get(topic_name, 0) + record.get("attempts", 1)
+                topic_stats[topic_data["title"]] = topic_stats.get(topic_data["title"], 0) + record.get("attempts", 1)
     
     lines = [
         "👑 <b>Админ-панель</b>\n",
@@ -893,8 +844,7 @@ async def cmd_admin_stats(message: Message) -> None:
     else:
         lines.append("📊 Статистика по темам пока пуста.")
     
-    text = "\n".join(lines)
-    await message.answer(text, parse_mode="HTML")
+    await message.answer("\n".join(lines), parse_mode="HTML")
 
 
 # ─── СЛУЖЕБНЫЕ КОМАНДЫ ───────────────────────────────────────
@@ -902,8 +852,6 @@ async def cmd_admin_stats(message: Message) -> None:
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
     user_id = str(message.from_user.id)
-    logger.info(f"🔄 ЗАПРОС СБРОСА от пользователя ID: {user_id}")
-    
     data = await load_completed()
     if user_id in data:
         del data[user_id]
@@ -925,10 +873,8 @@ async def cmd_debug(message: Message) -> None:
 async def cmd_testsave(message: Message) -> None:
     logger.info("🚀 ЗАПУЩЕНА КОМАНДА /testsave")
     await message.answer("⏳ Тестирую сохранение... Смотрите логи Render!")
-    
     user_id = str(message.from_user.id)
     test_data = {user_id: {"test": {"test_lesson": {"score": 99, "total": 100, "date": "TEST_MODE"}}}}
-    
     await save_completed(test_data)
     logger.info("🏁 КОМАНДА /testsave ЗАВЕРШЕНА")
     await message.answer("✅ Готово! Проверьте логи Render.")
@@ -939,9 +885,7 @@ async def cmd_testsave(message: Message) -> None:
 @router.errors()
 async def handle_errors(event: ErrorEvent, bot: Bot):
     exception = event.exception
-    
     if isinstance(exception, TelegramBadRequest):
         if "message is not modified" in str(exception):
             return True
-            
     return False
