@@ -6,11 +6,10 @@ import aiohttp
 import re
 from datetime import datetime
 
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent
 from aiogram.filters import CommandStart, Command
-
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest 
 
 from tests_data import TESTS, WORDS
 from config import BOT_TOKEN
@@ -248,15 +247,7 @@ async def show_results(callback: CallbackQuery) -> None:
     text = await format_results(callback.from_user.id)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]])
     
-    try:
-        await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
-    except TelegramBadRequest as e:
-        # Если ошибка именно в том, что сообщение не изменилось, мы её просто игнорируем
-        if "message is not modified" in str(e):
-            pass
-        else:
-            raise  # Любые другие ошибки пробрасываем дальше
-            
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "show_tests")
@@ -644,3 +635,21 @@ async def cmd_testsave(message: Message) -> None:
     await save_completed(test_data)
     logger.info("🏁 КОМАНДА /testsave ЗАВЕРШЕНА")
     await message.answer("✅ Готово! Проверьте логи Render.")
+
+# ─── ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ───────────────────────────
+@router.errors()
+async def handle_errors(event: ErrorEvent, bot: Bot):
+    """
+    Глобально перехватывает ошибки. 
+    Игнорирует ошибку "message is not modified", чтобы бот не падал 
+    при нажатии на кнопку, если текст на экране и так не изменился.
+    """
+    exception = event.exception
+    
+    if isinstance(exception, TelegramBadRequest):
+        if "message is not modified" in str(exception):
+            # Тихо игнорируем эту конкретную ошибку
+            return True
+            
+    # Все остальные ошибки будут выведены в стандартные логи Render
+    return False
