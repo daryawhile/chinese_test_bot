@@ -8,7 +8,7 @@ import io
 from datetime import datetime
 
 from aiogram import Router, F, Bot
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent, BufferedInputFile
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent, BufferedInputFile, WebAppInfo
 from aiogram.filters import CommandStart, Command
 from aiogram.exceptions import TelegramBadRequest
 from gtts import gTTS
@@ -183,6 +183,7 @@ def build_main_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
         [InlineKeyboardButton(text="🎴 Изучение слов", callback_data="show_words")],
         [InlineKeyboardButton(text="📖 Словарь", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="✍️ Порядок черт", callback_data="stroke_order_prompt")], # <-- НОВАЯ КНОПКА
         [InlineKeyboardButton(text="🔊 Озвучить текст", callback_data="tts_prompt")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")],
     ]
@@ -444,7 +445,55 @@ async def handle_text_input(message: Message) -> None:
             await message.answer("⚠️ Не удалось озвучить текст. Попробуйте ещё раз.")
         
         return
-    
+
+        # ─── Режим: Порядок черт ──────────────────────────────────
+    if session.get("type") == "stroke_order":
+        # Берем только первый иероглиф, если ввели фразу (Hanzi Writer лучше работает с 1-2 символами)
+        char_to_train = query[0] 
+        
+        # Пытаемся найти пиньинь и перевод в нашей базе
+        pinyin = "pīnyīn"
+        translation = "иероглиф"
+        
+        for topic_data in WORDS.values():
+            for word_str in topic_data["words"]:
+                parsed = parse_word(word_str)
+                if parsed and parsed["hanzi"] == char_to_train:
+                    pinyin = parsed["pinyin"]
+                    translation = parsed["translation"]
+                    break
+            if pinyin != "pīnyīn":
+                break
+        
+        # Формируем URL для Web App
+        import urllib.parse
+        web_app_url = (
+            f"https://daryawhile.github.io/chinese_test_bot/?"
+            f"char={urllib.parse.quote(char_to_train)}&"
+            f"pinyin={urllib.parse.quote(pinyin)}&"
+            f"translation={urllib.parse.quote(translation)}"
+        )
+        
+        # Очищаем сессию
+        if user_id in user_sessions:
+            del user_sessions[user_id]
+        
+        # Отправляем сообщение с кнопкой Web App
+        kb = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✍️ Открыть тренажер", web_app=WebAppInfo(url=web_app_url))],
+            [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+        ])
+        
+        await message.answer(
+            f"🎯 Тренируем иероглиф: <b>{char_to_train}</b>\n"
+            f"Пиньинь: <code>{pinyin}</code>\n"
+            f"Перевод: {translation}\n\n"
+            f"Нажмите кнопку ниже, чтобы открыть интерактивный холст!",
+            reply_markup=kb,
+            parse_mode="HTML"
+        )
+        return
+        
     # ─── Режим поиска ─────────────────────────────────────────
     if session.get("type") == "search":
         query = query.lower()
@@ -531,7 +580,27 @@ async def cancel_tts(callback: CallbackQuery) -> None:
     )
     await callback.answer()
     
+# ─── Хендлеры: Порядок черт (Web App) ────────────────────────
 
+@router.callback_query(F.data == "stroke_order_prompt")
+async def stroke_order_prompt(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    user_sessions[user_id] = {"type": "stroke_order"}
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_main")]
+    ])
+    
+    await callback.message.edit_text(
+        "✍️ <b>Тренажер порядка черт</b>\n\n"
+        "Введите <b>один иероглиф</b> или короткое слово, которое хотите потренировать.\n\n"
+        "Например: <code>猫</code> или <code>谢</code>\n\n"
+        "Бот откроет интерактивный холст для рисования.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    
 # ─── Хендлеры: ТЕСТЫ ─────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("test_lesson_"))
