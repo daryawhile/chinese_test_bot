@@ -180,11 +180,12 @@ def parse_word(word_str: str) -> dict:
 def build_main_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📊 Мои результаты", callback_data="show_results")],
-        [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
-        [InlineKeyboardButton(text="🎴 Изучение слов", callback_data="show_words")],
-        [InlineKeyboardButton(text="📖 Словарь", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="🎴 Слова", callback_data="show_words")],
+        [InlineKeyboardButton(text="🔍 Найти слово", callback_data="search_word")],
         [InlineKeyboardButton(text="✍️ Порядок черт", callback_data="stroke_order_prompt")], # <-- НОВАЯ КНОПКА
         [InlineKeyboardButton(text="🔊 Озвучить текст", callback_data="tts_prompt")],
+        [InlineKeyboardButton(text="📖 Словарь", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -595,6 +596,24 @@ async def stroke_order_prompt(callback: CallbackQuery) -> None:
         "✍️ <b>Порядок черт</b>\n\n"
         "Введите <b>один иероглиф</b> или короткое слово, которое хотите потренировать.\n\n"
         "Например: <code>猫</code> или <code>谢</code>\n",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "search_word")
+async def prompt_search(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    user_sessions[user_id] = {"type": "search"}
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_main")]
+    ])
+    
+    await callback.message.edit_text(
+        "🔍 <b>Поиск слова</b>\n\n"
+        "Введите иероглиф, пиньинь или перевод на русском.\n\n"
+        "Например: <code>猫</code>, <code>māo</code> или <code>кошка</code>",
         reply_markup=kb,
         parse_mode="HTML"
     )
