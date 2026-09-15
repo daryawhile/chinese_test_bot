@@ -198,7 +198,7 @@
         onComplete: function(data) {
           quizActive = false;
           document.getElementById('status').innerHTML = 
-            `<span class="correct">🎉 Готово!</span>`;
+            `<span class="correct">🎉 Готово! </span>`;
           
           if (tg.sendData) {
             tg.sendData(JSON.stringify({
