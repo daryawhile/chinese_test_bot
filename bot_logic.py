@@ -183,6 +183,7 @@ def build_main_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
         [InlineKeyboardButton(text="🎴 Изучение слов", callback_data="show_words")],
         [InlineKeyboardButton(text="📖 Словарь", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="🔊 Озвучить текст", callback_data="tts_prompt")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -391,59 +392,145 @@ async def cancel_search(callback: CallbackQuery) -> None:
 
 
 @router.message(F.text & ~F.text.startswith("/"))
-async def handle_search_input(message: Message) -> None:
+async def handle_text_input(message: Message) -> None:
+    """Обрабатывает ввод пользователя для поиска или озвучки."""
     user_id = message.from_user.id
     session = user_sessions.get(user_id)
     
-    if not session or session.get("type") != "search":
+    # Если пользователь не в режиме поиска или озвучки, игнорируем
+    if not session:
         return
     
-    query = message.text.strip().lower()
+    query = message.text.strip()
+    
     if not query:
-        await message.answer("⚠️ Введите слово для поиска.")
+        await message.answer("⚠️ Введите текст.")
         return
     
-    found_words = []
-    for topic_id, topic_data in WORDS.items():
-        for word_str in topic_data["words"]:
-            parsed = parse_word(word_str)
-            if not parsed:
-                continue
-            if (query in parsed["hanzi"].lower() or 
-                query in parsed["pinyin"].lower() or 
-                query in parsed["translation"].lower()):
-                found_words.append({"topic": topic_data["title"], "word": parsed})
+    # ─── Режим озвучки ────────────────────────────────────────
+    if session.get("type") == "tts":
+        # Проверяем наличие иероглифов
+        has_chinese = bool(re.search(r'[\u4e00-\u9fff]', query))
+        
+        if not has_chinese:
+            await message.answer(
+                "⚠️ <b>Для озвучки нужен текст с иероглифами.</b>\n\n"
+                "Введите фразу на китайском языке, например:\n"
+                "<code>你好，我叫玛丽亚</code>",
+                parse_mode="HTML"
+            )
+            return
+        
+        # Отправляем голосовое сообщение
+        try:
+            tts = gTTS(text=query, lang="zh")
+            audio_buffer = io.BytesIO()
+            tts.write_to_fp(audio_buffer)
+            audio_buffer.seek(0)
+            
+            voice_file = BufferedInputFile(file=audio_buffer.read(), filename="audio.mp3")
+            await message.answer_voice(voice_file)
+            
+            # Предлагаем ввести ещё или отменить
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+            ])
+            await message.answer(
+                "✅ Готово! Введите ещё одну фразу или нажмите кнопку ниже.",
+                reply_markup=kb
+            )
+        except Exception as e:
+            logger.error(f"Ошибка генерации аудио для TTS: {e}")
+            await message.answer("⚠️ Не удалось озвучить текст. Попробуйте ещё раз.")
+        
+        return
     
-    if user_id in user_sessions:
-        del user_sessions[user_id]
-    
-    if not found_words:
+    # ─── Режим поиска ─────────────────────────────────────────
+    if session.get("type") == "search":
+        query = query.lower()
+        
+        found_words = []
+        for topic_id, topic_data in WORDS.items():
+            for word_str in topic_data["words"]:
+                parsed = parse_word(word_str)
+                if not parsed:
+                    continue
+                
+                if (query in parsed["hanzi"].lower() or 
+                    query in parsed["pinyin"].lower() or 
+                    query in parsed["translation"].lower()):
+                    found_words.append({
+                        "topic": topic_data["title"],
+                        "word": parsed
+                    })
+        
+        if user_id in user_sessions:
+            del user_sessions[user_id]
+        
+        if not found_words:
+            kb = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="search_word")],
+                [InlineKeyboardButton(text="🔙 К словарю", callback_data="show_dictionary")]
+            ])
+            await message.answer(
+                "😔 <b>Слово не найдено</b>\n\n"
+                "Проверьте правильность ввода или возможно это слово мы ещё не изучали.\n\n"
+                "Попробуйте поискать в разделе <b>📖 Словарь</b>.",
+                reply_markup=kb,
+                parse_mode="HTML"
+            )
+            return
+        
+        lines = [f"🔍 <b>Найдено: {len(found_words)} слов(а)</b>\n"]
+        for item in found_words[:10]:
+            lines.append(f"• <b>{item['word']['hanzi']}</b> [{item['word']['pinyin']}] — {item['word']['translation']}")
+            lines.append(f"  <i>(Тема: {item['topic']})</i>\n")
+        
+        if len(found_words) > 10:
+            lines.append(f"... и ещё {len(found_words) - 10} слов")
+        
         kb = InlineKeyboardMarkup(inline_keyboard=[
             [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="search_word")],
             [InlineKeyboardButton(text="🔙 К словарю", callback_data="show_dictionary")]
         ])
-        await message.answer(
-            "😔 <b>Слово не найдено</b>\n\n"
-            "Проверьте правильность ввода или возможно это слово мы ещё не изучали.",
-            reply_markup=kb,
-            parse_mode="HTML"
-        )
-        return
-    
-    lines = [f"🔍 <b>Найдено: {len(found_words)} слов(а)</b>\n"]
-    for item in found_words[:10]:
-        lines.append(f"• <b>{item['word']['hanzi']}</b> [{item['word']['pinyin']}] — {item['word']['translation']}")
-        lines.append(f"  <i>(Тема: {item['topic']})</i>\n")
-    
-    if len(found_words) > 10:
-        lines.append(f"... и ещё {len(found_words) - 10} слов")
+        
+        await message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+
+# ─── Хендлеры: Озвучка текста ─────────────────────────────────
+
+@router.callback_query(F.data == "tts_prompt")
+async def tts_prompt(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    user_sessions[user_id] = {"type": "tts"}
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Искать ещё", callback_data="search_word")],
-        [InlineKeyboardButton(text="🔙 К словарю", callback_data="show_dictionary")]
+        [InlineKeyboardButton(text="🔙 Отмена", callback_data="cancel_tts")]
     ])
-    await message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
+    
+    await callback.message.edit_text(
+        "🎤 <b>Озвучка текста</b>\n\n"
+        "Введите фразу на китайском языке (с иероглифами).\n\n"
+        "Например: <code>你好，我叫玛丽亚</code>\n\n"
+        "Бот озвучит ваш текст голосом.",
+        reply_markup=kb,
+        parse_mode="HTML"
+    )
+    await callback.answer()
 
+
+@router.callback_query(F.data == "cancel_tts")
+async def cancel_tts(callback: CallbackQuery) -> None:
+    user_id = callback.from_user.id
+    if user_id in user_sessions and user_sessions[user_id].get("type") == "tts":
+        del user_sessions[user_id]
+    
+    await callback.message.edit_text(
+        "🇨🇳 <b>Главное меню</b>\n\nВыберите раздел:", 
+        reply_markup=build_main_keyboard(), 
+        parse_mode="HTML"
+    )
+    await callback.answer()
+    
 
 # ─── Хендлеры: ТЕСТЫ ─────────────────────────────────────────
 
