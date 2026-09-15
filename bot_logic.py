@@ -480,12 +480,12 @@ async def handle_text_input(message: Message) -> None:
         
         # Отправляем сообщение с кнопкой Web App
         kb = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="✍️ Открыть тренажер", web_app=WebAppInfo(url=web_app_url))],
+            [InlineKeyboardButton(text="✍️ Открыть", web_app=WebAppInfo(url=web_app_url))],
             [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
         ])
         
         await message.answer(
-            f"🎯 Тренируем иероглиф: <b>{char_to_train}</b>\n"
+            f"🎯 Иероглиф: <b>{char_to_train}</b>\n"
             f"Пиньинь: <code>{pinyin}</code>\n"
             f"Перевод: {translation}\n\n"
             f"Нажмите кнопку ниже, чтобы открыть интерактивный холст!",
@@ -592,10 +592,9 @@ async def stroke_order_prompt(callback: CallbackQuery) -> None:
     ])
     
     await callback.message.edit_text(
-        "✍️ <b>Тренажер порядка черт</b>\n\n"
+        "✍️ <b>Порядок черт</b>\n\n"
         "Введите <b>один иероглиф</b> или короткое слово, которое хотите потренировать.\n\n"
-        "Например: <code>猫</code> или <code>谢</code>\n\n"
-        "Бот откроет интерактивный холст для рисования.",
+        "Например: <code>猫</code> или <code>谢</code>\n",
         reply_markup=kb,
         parse_mode="HTML"
     )
