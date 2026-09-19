@@ -319,6 +319,47 @@ async def back_to_main(callback: CallbackQuery) -> None:
 async def noop(callback: CallbackQuery) -> None:
     await callback.answer()
 
+# ─── Команда /speak для озвучки (работает в группах и личных сообщениях) ───
+
+@router.message(Command("speak"))
+async def cmd_speak(message: Message) -> None:
+    """Озвучивает текст после команды /speak"""
+    # Получаем текст после команды
+    text = message.text.replace("/speak", "", 1).strip()
+    
+    if not text:
+        await message.answer(
+            "🎤 <b>Использование:</b>\n\n"
+            "<code>/speak 你好，我叫玛丽亚</code>\n\n"
+            "Бот озвучит ваш текст голосом.",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Проверяем наличие иероглифов
+    has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
+    
+    if not has_chinese:
+        await message.answer(
+            "⚠️ <b>Для озвучки нужен текст с иероглифами.</b>\n\n"
+            "Пример: <code>/speak 你好</code>",
+            parse_mode="HTML"
+        )
+        return
+    
+    # Генерируем аудио
+    try:
+        tts = gTTS(text=text, lang="zh")
+        audio_buffer = io.BytesIO()
+        tts.write_to_fp(audio_buffer)
+        audio_buffer.seek(0)
+        
+        voice_file = BufferedInputFile(file=audio_buffer.read(), filename="audio.mp3")
+        await message.answer_voice(voice_file)
+    except Exception as e:
+        logger.error(f"Ошибка генерации аудио для /speak: {e}")
+        await message.answer("⚠️ Не удалось озвучить текст. Попробуйте ещё раз.")
+
 
 # ─── Хендлеры: Настройки ──────────────────────────────────────
 
@@ -396,12 +437,19 @@ async def cancel_search(callback: CallbackQuery) -> None:
 @router.message(F.text & ~F.text.startswith("/"))
 async def handle_text_input(message: Message) -> None:
     """Обрабатывает ввод пользователя для поиска или озвучки."""
+    
+    # ─── НОВОЕ: Игнорируем обычные сообщения в группах ─────────
+    if message.chat.type in ["group", "supergroup"]:
+        return  # Выходим, не обрабатываем
+    # ────────────────────────────────────────────────────────────
+    
     user_id = message.from_user.id
     session = user_sessions.get(user_id)
     
     # Если пользователь не в режиме поиска или озвучки, игнорируем
     if not session:
         return
+    
     
     query = message.text.strip()
     
