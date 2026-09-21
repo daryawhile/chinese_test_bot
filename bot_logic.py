@@ -70,7 +70,8 @@ async def save_user_data(user_id: int, data: dict) -> None:
         upsert=True
     )
 
-# ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
+# ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ, MONGODB) ───────────────
+
 async def ensure_user_loaded(user_id: int) -> dict:
     """Проверяет память. Если данных нет, загружает из MongoDB."""
     if user_id not in user_sessions:
@@ -78,9 +79,9 @@ async def ensure_user_loaded(user_id: int) -> dict:
     
     session = user_sessions[user_id]
     
-    # Если настроек или прогресса нет, загружаем из базы
+    # Если настроек или прогресса нет, загружаем из базы MongoDB
     if "settings" not in session or "progress" not in session:
-        user_data = await get_user_data(user_id)
+        user_data = await get_user_data(user_id)  # <-- Используем новую функцию MongoDB!
         session["settings"] = user_data.get("settings", {"audio_enabled": False})
         session["progress"] = user_data
         
@@ -88,24 +89,6 @@ async def ensure_user_loaded(user_id: int) -> dict:
 
 # ─── Админ-панель ─────────────────────────────────────────────
 admin_users: set[int] = set()
-
-
-# ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
-async def ensure_user_loaded(user_id: int) -> dict:
-    """Проверяет память. Если данных нет, загружает из JSONBin (таймаут 5 сек)."""
-    if user_id not in user_sessions:
-        user_sessions[user_id] = {}
-    
-    session = user_sessions[user_id]
-    
-    # Если настроек или прогресса нет, загружаем из JSONBin
-    if "settings" not in session or "progress" not in session:
-        data = await load_completed()
-        user_data = data.get(str(user_id), {})
-        session["settings"] = user_data.get("settings", {"audio_enabled": False})
-        session["progress"] = user_data
-        
-    return session
 
 
 # ─── Функции для работы с настройками пользователя ────────────
