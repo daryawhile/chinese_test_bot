@@ -4,6 +4,7 @@ import random
 import re
 import io
 import asyncpg
+import json
 from datetime import datetime
 from aiogram import Router, F, Bot
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton, ErrorEvent, BufferedInputFile, WebAppInfo
