@@ -88,8 +88,8 @@ async def load_completed() -> dict:
     try:
         logger.info(f"🔄 Загружаем данные из JSONBin: {JSONBIN_BIN_ID}")
         
-        # ⚡️ ДОБАВЛЕН ЖЕСТКИЙ ТАЙМАУТ 5 СЕКУНД
-        timeout = aiohttp.ClientTimeout(total=5)
+        # ⚡️ ДОБАВЛЕН ЖЕСТКИЙ ТАЙМАУТ 5 СЕКУНД изменила на 1
+        timeout = aiohttp.ClientTimeout(total=1)
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(JSONBIN_URL + "/latest", headers=HEADERS) as resp:
