@@ -36,18 +36,17 @@ HEADERS = {"X-Master-Key": JSONBIN_API_KEY, "Content-Type": "application/json"} 
 # ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
 async def ensure_user_loaded(user_id: int) -> dict:
     """Проверяет память. Если данных нет, загружает из JSONBin (таймаут 5 сек)."""
-    session = user_sessions.get(user_id, {})
+    if user_id not in user_sessions:
+        user_sessions[user_id] = {}
     
-    # Если ключа "settings" нет, значит бот перезапустился или это первый запрос
-    if "settings" not in session:
+    session = user_sessions[user_id]
+    
+    # Если настроек или прогресса нет, загружаем из JSONBin
+    if "settings" not in session or "progress" not in session:
         data = await load_completed()
         user_data = data.get(str(user_id), {})
-        
-        # Обновляем сессию, не затирая временные поля (например, "type": "search")
         session["settings"] = user_data.get("settings", {"audio_enabled": False})
-        session["progress"] = user_data  # Весь прогресс тоже в память для скорости
-        
-        user_sessions[user_id] = session
+        session["progress"] = user_data
         
     return session
 
@@ -447,7 +446,9 @@ async def toggle_audio(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "search_word")
 async def search_word_prompt(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
-    user_sessions[user_id] = {"type": "search"}
+    # ⚡️ Безопасное обновление
+    session = user_sessions.setdefault(user_id, {})
+    session["type"] = "search"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="cancel_search")]
@@ -642,7 +643,9 @@ async def handle_text_input(message: Message) -> None:
 @router.callback_query(F.data == "tts_prompt")
 async def tts_prompt(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
-    user_sessions[user_id] = {"type": "tts"}
+    # ⚡️ Безопасное обновление
+    session = user_sessions.setdefault(user_id, {})
+    session["type"] = "tts"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="cancel_tts")]
@@ -677,7 +680,9 @@ async def cancel_tts(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "stroke_order_prompt")
 async def stroke_order_prompt(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
-    user_sessions[user_id] = {"type": "stroke_order"}
+    # ⚡️ Безопасное обновление
+    session = user_sessions.setdefault(user_id, {})
+    session["type"] = "stroke_order"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔙 Отмена", callback_data="back_to_main")]
@@ -720,19 +725,20 @@ async def start_test(callback: CallbackQuery) -> None:
     if lesson_id not in TESTS:
         await callback.answer("Тест не найден.", show_alert=True)
         return
-    
+        
     questions = [q.copy() for q in TESTS[lesson_id]["questions"]]
     random.shuffle(questions)
-    
     for q in questions:
         options_with_correct = [(opt, i == q["correct"]) for i, opt in enumerate(q["options"])]
         random.shuffle(options_with_correct)
         q["shuffled_options"] = [opt for opt, _ in options_with_correct]
         q["shuffled_correct"] = next(i for i, (_, is_correct) in enumerate(options_with_correct) if is_correct)
-    
-    user_sessions[user_id] = {
+        
+    # ⚡️ ВАЖНО: Используем .update(), чтобы НЕ стереть настройки и прогресс!
+    session = user_sessions.setdefault(user_id, {})
+    session.update({
         "type": "test", "lesson": lesson_id, "question": 0, "score": 0, "shuffled_questions": questions
-    }
+    })
     
     q = questions[0]
     total = len(questions)
@@ -873,22 +879,20 @@ async def start_words(callback: CallbackQuery) -> None:
     if topic_id not in WORDS:
         await callback.answer("Тема не найдена.", show_alert=True)
         return
-    
+        
     words_list = WORDS[topic_id]["words"]
     topic_title = WORDS[topic_id]["title"]
-    
     words = [parse_word(w) for w in words_list]
     words = [w for w in words if w is not None]
     
     if len(words) < 4:
         await callback.answer("Недостаточно слов для теста.", show_alert=True)
         return
-    
+        
     questions = []
     for _ in range(min(10, len(words))):
         correct_word = random.choice(words)
         question_type = random.choice(["hanzi", "pinyin", "translation"])
-        
         if question_type == "hanzi":
             question_text = correct_word["hanzi"]
             answer_type = random.choice(["pinyin", "translation"])
@@ -898,11 +902,10 @@ async def start_words(callback: CallbackQuery) -> None:
         else:
             question_text = correct_word["translation"]
             answer_type = random.choice(["hanzi", "pinyin"])
-        
+            
         wrong_words = [w for w in words if w != correct_word]
         random.shuffle(wrong_words)
         wrong_words = wrong_words[:3]
-        
         options = [correct_word[answer_type]] + [w[answer_type] for w in wrong_words]
         random.shuffle(options)
         correct_index = options.index(correct_word[answer_type])
@@ -911,10 +914,12 @@ async def start_words(callback: CallbackQuery) -> None:
             "question_text": question_text, "question_type": question_type, "answer_type": answer_type,
             "options": options, "correct": correct_index, "all_words": [correct_word] + wrong_words,
         })
-    
-    user_sessions[user_id] = {
+        
+    # ⚡️ ВАЖНО: Используем .update(), чтобы НЕ стереть настройки и прогресс!
+    session = user_sessions.setdefault(user_id, {})
+    session.update({
         "type": "words", "lesson": topic_id, "question": 0, "score": 0, "questions": questions
-    }
+    })
     
     q = questions[0]
     total = len(questions)
