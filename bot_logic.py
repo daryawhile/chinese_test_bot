@@ -206,7 +206,7 @@ def build_main_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Мои результаты", callback_data="show_results")],
         [InlineKeyboardButton(text="🎴 Слова", callback_data="show_words")],
         [InlineKeyboardButton(text="🔍 Найти слово", callback_data="search_word")],
-        [InlineKeyboardButton(text="✍️ Порядок черт", callback_data="stroke_order_prompt")], # <-- НОВАЯ КНОПКА
+        [InlineKeyboardButton(text="✍️ Порядок черт", callback_data="stroke_order_prompt")],
         [InlineKeyboardButton(text="🔊 Озвучить текст", callback_data="tts_prompt")],
         [InlineKeyboardButton(text="📖 Словарь", callback_data="show_dictionary")],
         [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
@@ -306,18 +306,28 @@ async def format_results(user_id: int) -> str:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    logger.info(f"🚀 ПОЛУЧЕНА КОМАНДА /start от пользователя {message.from_user.id}")
     user_id = message.from_user.id
     
-    # ⚡️ Предзагружаем данные в память при старте
-    await ensure_user_loaded(user_id)
-    
-    await message.answer(
-        "🇨🇳 <b>Добро пожаловать!</b>\n\n"
-        "Это бот для изучения китайского языка.\n\n"
-        "💡 Вы можете проходить тесты и изучать слова сколько угодно раз!", 
-        reply_markup=build_main_keyboard(), 
-        parse_mode="HTML"
-    )
+    try:
+        # 1. Пробуем загрузить данные
+        await ensure_user_loaded(user_id)
+        logger.info("✅ Данные из MongoDB успешно загружены в память")
+        
+        # 2. Пробуем отправить сообщение
+        await message.answer(
+            "🇨🇳 <b>Добро пожаловать!</b>\n\n"
+            "Это бот для изучения китайского языка.\n\n"
+            "💡 Вы можете проходить тесты и изучать слова сколько угодно раз!", 
+            reply_markup=build_main_keyboard(), 
+            parse_mode="HTML"
+        )
+        logger.info("🎉 СООБЩЕНИЕ /start УСПЕШНО ОТПРАВЛЕНО ПОЛЬЗОВАТЕЛЮ!")
+        
+    except Exception as e:
+        # Если что-то пошло не так, мы УВИДИМ это в логах и в чате
+        logger.error(f"❌ КРИТИЧЕСКАЯ ОШИБКА в команде /start: {e}", exc_info=True)
+        await message.answer("⚠️ Произошла техническая ошибка при запуске. Попробуйте еще раз через минуту.")
 
 @router.callback_query(F.data == "show_results")
 async def show_results(callback: CallbackQuery) -> None:
