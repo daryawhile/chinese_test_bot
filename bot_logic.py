@@ -47,11 +47,13 @@ async def get_user_data(user_id: int) -> dict:
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow('SELECT data FROM users WHERE user_id = $1', str(user_id))
         if row:
-            # asyncpg сам превратит JSONB из базы обратно в словарь Python
-            return row['data']
+            raw_data = row['data']
+            # ⚡️ ЗАЩИТА: Если база вернула строку, превращаем её в словарь Python
+            if isinstance(raw_data, str):
+                return json.loads(raw_data)
+            return raw_data
         else:
             default_data = {"settings": {"audio_enabled": False}, "progress": {}}
-            # ⚡️ ИСПРАВЛЕНИЕ: Превращаем словарь в JSON-строку через json.dumps()
             await conn.execute(
                 'INSERT INTO users (user_id, data) VALUES ($1, $2)', 
                 str(user_id), 
