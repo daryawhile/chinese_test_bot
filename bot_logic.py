@@ -128,7 +128,6 @@ async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, t
     data = await get_user_data(user_id)
     if test_type not in data:
         data[test_type] = {}
-    
     if lesson_id not in data[test_type]:
         data[test_type][lesson_id] = {
             "best_score": score, "best_total": total, "last_score": score,
@@ -140,14 +139,16 @@ async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, t
         record["last_score"] = score
         record["last_total"] = total
         record["date"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-        
         current_percent = (score / total * 100) if total > 0 else 0
         best_percent = (record["best_score"] / record["best_total"] * 100) if record["best_total"] > 0 else 0
         if current_percent > best_percent:
             record["best_score"] = score
             record["best_total"] = total
-            
     await save_user_data(user_id, data)
+    
+    # ️ ОБНОВЛЯЕМ ДАННЫЕ В ПАМЯТИ, чтобы show_results показывал актуальные результаты
+    if user_id in user_sessions:
+        user_sessions[user_id]["progress"] = data
 
 # ─── Парсер слов ──────────────────────────────────────────────
 def parse_word(word_str: str) -> dict:
