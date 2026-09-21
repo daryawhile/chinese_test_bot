@@ -142,13 +142,19 @@ async def save_completed(data: dict) -> None:
     
     logger.info(f"🔄 Сохраняем данные в JSONBin: {JSONBIN_BIN_ID}")
     try:
-        async with aiohttp.ClientSession() as session:
+        # ⚡️ ДОБАВЛЯЕМ ТАЙМАУТ 5 СЕКУНД И СЮДА
+        timeout = aiohttp.ClientTimeout(total=5)
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.put(JSONBIN_URL, json=data, headers=HEADERS) as resp:
                 if resp.status == 200:
                     logger.info("✅ Данные успешно сохранены в JSONBin!")
                 else:
+                    # Используем warning вместо error, чтобы не пугать, так как данные всё равно в памяти
                     text = await resp.text()
-                    logger.error(f"❌ Ошибка сохранения в JSONBin: {resp.status} - {text}")
+                    logger.warning(f"⚠️ Ошибка сохранения в JSONBin: {resp.status}. Данные пока только в памяти.")
+    except asyncio.TimeoutError:
+        logger.warning("⏱️ JSONBin не отвечает при сохранении (таймаут 5 сек). Данные сохранены только в памяти.")
     except Exception as e:
         logger.error(f"❌ Исключение при сохранении в JSONBin: {e}")
 
