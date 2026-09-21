@@ -563,16 +563,20 @@ async def handle_test_next(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("test_finish_"))
 async def handle_test_finish(callback: CallbackQuery) -> None:
+    logger.info(f"🏁 НАЖАТА КНОПКА 'ПОКАЗАТЬ РЕЗУЛЬТАТЫ' пользователем {callback.from_user.id}")
     lesson_id = callback.data.removeprefix("test_finish_")
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
     
     if not session or session.get("type") != "test":
-        await callback.answer("️ Сессия не найдена.", show_alert=True)
+        logger.warning(f"⚠️ Сессия не найдена. Текущая сессия: {session}")
+        await callback.answer("⚠️ Сессия не найдена. Начните тест заново.", show_alert=True)
         return
         
-    score = session["score"]
-    total = len(session["shuffled_questions"])
+    score = session.get("score", 0)
+    total = len(session.get("shuffled_questions", []))
+    
+    logger.info(f"💾 Сохраняем результат: {score}/{total} для урока {lesson_id}")
     await mark_completed(user_id, lesson_id, score, total, "test")
     
     audio_msg_id = session.pop("audio_message_id", None)
@@ -587,10 +591,24 @@ async def handle_test_finish(callback: CallbackQuery) -> None:
         for key in ["type", "lesson", "question", "score", "shuffled_questions", "questions", "audio_message_id"]:
             temp_session.pop(key, None)
             
-    percent = round(score / total * 100)
+    percent = round(score / total * 100) if total > 0 else 0
     emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+    
+    # ⚡️ БЕЗОПАСНОЕ получение названия, чтобы избежать скрытых ошибок
+    lesson_title = TESTS.get(lesson_id, {}).get("title", "Неизвестный тест")
+    text_to_send = f"{emoji} <b>Тест завершён!</b>\n\n📖 {lesson_title}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)"
+    
+    logger.info(f"📤 Пытаемся обновить сообщение текстом:\n{text_to_send}")
+    
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]])
-    await callback.message.edit_text(f"{emoji} <b>Тест завершён!</b>\n\n📖 {TESTS[lesson_id]['title']}\n Результат: <b>{score}/{total}</b> ({percent}%)", reply_markup=kb, parse_mode="HTML")
+    
+    try:
+        await callback.message.edit_text(text_to_send, reply_markup=kb, parse_mode="HTML")
+        logger.info("✅ Сообщение успешно обновлено!")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обновлении сообщения: {e}", exc_info=True)
+        await callback.answer("⚠️ Произошла ошибка при показе результатов.", show_alert=True)
+        
     await callback.answer()
 
 # ─── Хендлеры: ИЗУЧЕНИЕ СЛОВ ─────────────────────────────────
@@ -716,16 +734,20 @@ async def handle_word_next(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("word_finish_"))
 async def handle_word_finish(callback: CallbackQuery) -> None:
+    logger.info(f"🏁 НАЖАТА КНОПКА 'ПОКАЗАТЬ РЕЗУЛЬТАТЫ' (СЛОВА) пользователем {callback.from_user.id}")
     topic_id = callback.data.removeprefix("word_finish_")
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
     
     if not session or session.get("type") != "words":
-        await callback.answer("️ Сессия не найдена.", show_alert=True)
+        logger.warning(f"⚠️ Сессия не найдена. Текущая сессия: {session}")
+        await callback.answer("⚠️ Сессия не найдена. Начните тему заново.", show_alert=True)
         return
         
-    score = session["score"]
-    total = len(session["questions"])
+    score = session.get("score", 0)
+    total = len(session.get("questions", []))
+    
+    logger.info(f"💾 Сохраняем результат слов: {score}/{total} для темы {topic_id}")
     await mark_completed(user_id, topic_id, score, total, "words")
     
     audio_msg_id = session.pop("audio_message_id", None)
@@ -740,11 +762,23 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
         for key in ["type", "lesson", "question", "score", "shuffled_questions", "questions", "audio_message_id"]:
             temp_session.pop(key, None)
             
-    percent = round(score / total * 100)
+    percent = round(score / total * 100) if total > 0 else 0
     emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
-    topic_title = WORDS[topic_id]["title"]
-    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=" В главное меню", callback_data="back_to_main")]])
-    await callback.message.edit_text(f"{emoji} <b>Изучение слов завершено!</b>\n\n🎴 {topic_title}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)", reply_markup=kb, parse_mode="HTML")
+    
+    topic_title = WORDS.get(topic_id, {}).get("title", "Неизвестная тема")
+    text_to_send = f"{emoji} <b>Изучение слов завершено!</b>\n\n🎴 {topic_title}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)"
+    
+    logger.info(f"📤 Пытаемся обновить сообщение текстом:\n{text_to_send}")
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]])
+    
+    try:
+        await callback.message.edit_text(text_to_send, reply_markup=kb, parse_mode="HTML")
+        logger.info("✅ Сообщение успешно обновлено!")
+    except Exception as e:
+        logger.error(f"❌ Ошибка при обновлении сообщения: {e}", exc_info=True)
+        await callback.answer("⚠️ Произошла ошибка при показе результатов.", show_alert=True)
+        
     await callback.answer()
 
 # ─── Хендлеры: СЛОВАРЬ ──────────────────────────────────────
@@ -833,11 +867,15 @@ async def cmd_reset(message: Message) -> None:
         del user_sessions[message.from_user.id]
     await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>", parse_mode="HTML")
 
-# ── ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ───────────────────────────
+# ─── ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ───────────────────────────
 @router.errors()
 async def handle_errors(event: ErrorEvent, bot: Bot):
     exception = event.exception
+    # ⚡️ ТЕПЕРЬ МЫ БУДЕМ ВИДЕТЬ ВСЕ ОШИБКИ В ЛОГАХ!
+    logger.error(f"❌ ГЛОБАЛЬНАЯ ОШИБКА: {type(exception).__name__}: {exception}")
+    
     if isinstance(exception, TelegramBadRequest):
         if "message is not modified" in str(exception):
+            logger.info("ℹ️ Сообщение не изменено (это нормально, если текст тот же)")
             return True
     return False
