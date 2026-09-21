@@ -39,8 +39,11 @@ async def init_db():
         return
     
     mongo_client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
-    db = mongo_client.get_default_database()
-    logger.info("✅ Подключение к MongoDB установлено!")
+    
+    # ⚡️ ЯВНО указываем имя базы данных (MongoDB создаст её автоматически при первом сохранении)
+    db = mongo_client["chinese_bot_db"]
+    
+    logger.info("✅ Подключение к MongoDB успешно установлено!")
 
 async def get_user_data(user_id: int) -> dict:
     """Получает данные пользователя из MongoDB."""
