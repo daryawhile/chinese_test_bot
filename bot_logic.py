@@ -46,15 +46,22 @@ async def get_user_data(user_id: int) -> dict:
     async with db_pool.acquire() as conn:
         row = await conn.fetchrow('SELECT data FROM users WHERE user_id = $1', str(user_id))
         if row:
+            # asyncpg сам превратит JSONB из базы обратно в словарь Python
             return row['data']
         else:
             default_data = {"settings": {"audio_enabled": False}, "progress": {}}
-            await conn.execute('INSERT INTO users (user_id, data) VALUES ($1, $2)', str(user_id), default_data)
+            # ⚡️ ИСПРАВЛЕНИЕ: Превращаем словарь в JSON-строку через json.dumps()
+            await conn.execute(
+                'INSERT INTO users (user_id, data) VALUES ($1, $2)', 
+                str(user_id), 
+                json.dumps(default_data)
+            )
             return default_data
 
 async def save_user_data(user_id: int, data: dict) -> None:
     """Сохраняет (или обновляет) данные пользователя в Neon."""
     async with db_pool.acquire() as conn:
+        # ⚡️ ИСПРАВЛЕНИЕ: Превращаем словарь в JSON-строку через json.dumps()
         await conn.execute(
             '''
             INSERT INTO users (user_id, data) 
@@ -62,7 +69,8 @@ async def save_user_data(user_id: int, data: dict) -> None:
             ON CONFLICT (user_id) 
             DO UPDATE SET data = EXCLUDED.data, updated_at = CURRENT_TIMESTAMP
             ''',
-            str(user_id), data
+            str(user_id), 
+            json.dumps(data)
         )
 
 # ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
