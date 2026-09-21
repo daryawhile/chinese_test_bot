@@ -55,9 +55,8 @@ async def ensure_user_loaded(user_id: int) -> dict:
 # ─── Функции для работы с настройками пользователя ────────────
 
 async def get_user_settings(user_id: int) -> dict:
-    data = await load_completed()
-    user_data = data.get(str(user_id), {})
-    return user_data.get("settings", {"audio_enabled": False})
+    session = await ensure_user_loaded(user_id)
+    return session.get("settings", {"audio_enabled": False})
 
 
 async def update_user_setting(user_id: int, setting: str, value: any) -> None:
@@ -106,9 +105,8 @@ async def load_completed() -> dict:
         return {}
     try:
         logger.info(f"🔄 Загружаем данные из JSONBin: {JSONBIN_BIN_ID}")
-        
-        # ⚡️ ДОБАВЛЕН ЖЕСТКИЙ ТАЙМАУТ 5 СЕКУНД изменила на 1
-        timeout = aiohttp.ClientTimeout(total=1)
+        # ⚡️ ТАЙМАУТ 5 СЕКУНД (1 секунда слишком мало для сети)
+        timeout = aiohttp.ClientTimeout(total=5)
         
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(JSONBIN_URL + "/latest", headers=HEADERS) as resp:
@@ -118,10 +116,8 @@ async def load_completed() -> dict:
                     return data.get("record", {})
                 else:
                     logger.error(f"❌ Ошибка загрузки: статус {resp.status}")
-                    return {}  # Возвращаем пустой словарь, чтобы бот не зависал
-                    
+                    return {}
     except asyncio.TimeoutError:
-        # ⚡️ Если JSONBin молчит больше 5 секунд, мы не ждем, а идем дальше
         logger.warning("⏱️ JSONBin не отвечает (таймаут 5 сек). Работаем с локальными данными.")
         return {}
     except Exception as e:
@@ -144,13 +140,11 @@ async def save_completed(data: dict) -> None:
     try:
         # ⚡️ ДОБАВЛЯЕМ ТАЙМАУТ 5 СЕКУНД И СЮДА
         timeout = aiohttp.ClientTimeout(total=5)
-        
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.put(JSONBIN_URL, json=data, headers=HEADERS) as resp:
                 if resp.status == 200:
                     logger.info("✅ Данные успешно сохранены в JSONBin!")
                 else:
-                    # Используем warning вместо error, чтобы не пугать, так как данные всё равно в памяти
                     text = await resp.text()
                     logger.warning(f"⚠️ Ошибка сохранения в JSONBin: {resp.status}. Данные пока только в памяти.")
     except asyncio.TimeoutError:
@@ -320,7 +314,7 @@ async def format_results(user_id: int) -> str:
 async def cmd_start(message: Message) -> None:
     user_id = message.from_user.id
     
-    # ⚡️ Предзагружаем данные в память при старте, чтобы всё летало
+    # ⚡️ Предзагружаем данные в память при старте
     await ensure_user_loaded(user_id)
     
     await message.answer(
