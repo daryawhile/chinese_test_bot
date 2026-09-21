@@ -33,6 +33,24 @@ JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY")
 JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}" if JSONBIN_BIN_ID else ""
 HEADERS = {"X-Master-Key": JSONBIN_API_KEY, "Content-Type": "application/json"} if JSONBIN_API_KEY else {}
 
+# ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
+async def ensure_user_loaded(user_id: int) -> dict:
+    """Проверяет память. Если данных нет, загружает из JSONBin (таймаут 5 сек)."""
+    session = user_sessions.get(user_id, {})
+    
+    # Если ключа "settings" нет, значит бот перезапустился или это первый запрос
+    if "settings" not in session:
+        data = await load_completed()
+        user_data = data.get(str(user_id), {})
+        
+        # Обновляем сессию, не затирая временные поля (например, "type": "search")
+        session["settings"] = user_data.get("settings", {"audio_enabled": False})
+        session["progress"] = user_data  # Весь прогресс тоже в память для скорости
+        
+        user_sessions[user_id] = session
+        
+    return session
+
 
 # ─── Функции для работы с настройками пользователя ────────────
 
@@ -56,9 +74,10 @@ async def update_user_setting(user_id: int, setting: str, value: any) -> None:
 # ─── Генерация аудио ──────────────────────────────────────────
 
 async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str) -> int | None:
-    """Отправляет аудио, если включено. Возвращает message_id голосового или None."""
-    settings = await get_user_settings(user_id)
-    if not settings.get("audio_enabled", False):
+    """Отправляет аудио, если включено. Берет настройку из ПАМЯТИ."""
+    session = await ensure_user_loaded(user_id)
+    
+    if not session.get("settings", {}).get("audio_enabled", False):
         return None
     
     has_chinese = bool(re.search(r'[\u4e00-\u9fff]', text))
@@ -230,7 +249,9 @@ def build_answer_keyboard(lesson_id: str, q_index: int, options: list[str], pref
 
 
 async def format_results(user_id: int) -> str:
-    results = await get_user_results(user_id)
+    session = await ensure_user_loaded(user_id)
+    results = session.get("progress", {})
+    
     if not results or results == {"_cleared": True}:
         return "📊 <b>Ваши результаты</b>\n\nВы ещё не прошли ни одного теста.\n\nВыберите раздел, чтобы начать!"
     
@@ -291,6 +312,11 @@ async def format_results(user_id: int) -> str:
 
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
+    user_id = message.from_user.id
+    
+    # ⚡️ Предзагружаем данные в память при старте, чтобы всё летало
+    await ensure_user_loaded(user_id)
+    
     await message.answer(
         "🇨🇳 <b>Добро пожаловать!</b>\n\n"
         "Это бот для изучения китайского языка.\n\n"
@@ -377,7 +403,8 @@ async def cmd_speak(message: Message) -> None:
 @router.callback_query(F.data == "show_settings")
 async def show_settings(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
-    settings = await get_user_settings(user_id)
+    session = await ensure_user_loaded(user_id)
+    settings = session.get("settings", {"audio_enabled": False})
     audio_status = "✅ Включено" if settings.get("audio_enabled", False) else "❌ Выключено"
     
     kb = InlineKeyboardMarkup(inline_keyboard=[
@@ -399,10 +426,15 @@ async def show_settings(callback: CallbackQuery) -> None:
 @router.callback_query(F.data == "toggle_audio")
 async def toggle_audio(callback: CallbackQuery) -> None:
     user_id = callback.from_user.id
-    settings = await get_user_settings(user_id)
-    current_status = settings.get("audio_enabled", False)
+    session = await ensure_user_loaded(user_id)
+    
+    current_status = session.get("settings", {}).get("audio_enabled", False)
     new_status = not current_status
     
+    # 1. Мгновенно обновляем в ПАМЯТИ (чтобы бот реагировал без задержек)
+    user_sessions[user_id]["settings"]["audio_enabled"] = new_status
+    
+    # 2. Сохраняем в JSONBin в фоне
     await update_user_setting(user_id, "audio_enabled", new_status)
     
     status_text = "✅ Включено" if new_status else "❌ Выключено"
