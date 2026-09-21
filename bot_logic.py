@@ -5,6 +5,7 @@ import random
 import aiohttp
 import re
 import io
+import asyncio
 from datetime import datetime
 
 from aiogram import Router, F, Bot
@@ -86,7 +87,11 @@ async def load_completed() -> dict:
         return {}
     try:
         logger.info(f"🔄 Загружаем данные из JSONBin: {JSONBIN_BIN_ID}")
-        async with aiohttp.ClientSession() as session:
+        
+        # ⚡️ ДОБАВЛЕН ЖЕСТКИЙ ТАЙМАУТ 5 СЕКУНД
+        timeout = aiohttp.ClientTimeout(total=5)
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(JSONBIN_URL + "/latest", headers=HEADERS) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -94,9 +99,15 @@ async def load_completed() -> dict:
                     return data.get("record", {})
                 else:
                     logger.error(f"❌ Ошибка загрузки: статус {resp.status}")
+                    return {}  # Возвращаем пустой словарь, чтобы бот не зависал
+                    
+    except asyncio.TimeoutError:
+        # ⚡️ Если JSONBin молчит больше 5 секунд, мы не ждем, а идем дальше
+        logger.warning("⏱️ JSONBin не отвечает (таймаут 5 сек). Работаем с локальными данными.")
+        return {}
     except Exception as e:
         logger.error(f"❌ Исключение при загрузке из JSONBin: {e}")
-    return {}
+        return {}
 
 
 async def save_completed(data: dict) -> None:
