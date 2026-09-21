@@ -24,14 +24,68 @@ logger = logging.getLogger(__name__)
 router = Router()
 user_sessions: dict[int, dict] = {}
 
+# ─── ПОДКЛЮЧЕНИЕ К MONGODB ──────────────────────────────────
+import motor.motor_asyncio
+
+mongo_client = None
+db = None
+
+async def init_db():
+    """Инициализирует подключение к MongoDB."""
+    global mongo_client, db
+    mongo_uri = os.getenv("MONGODB_URI")
+    if not mongo_uri:
+        logger.error("❌ MONGODB_URI не найден в переменных окружения!")
+        return
+    
+    mongo_client = motor.motor_asyncio.AsyncIOMotorClient(mongo_uri)
+    db = mongo_client.get_default_database()
+    logger.info("✅ Подключение к MongoDB установлено!")
+
+async def get_user_data(user_id: int) -> dict:
+    """Получает данные пользователя из MongoDB."""
+    collection = db.users
+    user_id_str = str(user_id)
+    
+    user_doc = await collection.find_one({"user_id": user_id_str})
+    if user_doc:
+        return user_doc.get("data", {})
+    else:
+        # Создаем нового пользователя с дефолтными данными
+        default_data = {"settings": {"audio_enabled": False}, "progress": {}}
+        await collection.insert_one({"user_id": user_id_str, "data": default_data})
+        return default_data
+
+async def save_user_data(user_id: int, data: dict) -> None:
+    """Сохраняет (или обновляет) данные пользователя в MongoDB."""
+    collection = db.users
+    user_id_str = str(user_id)
+    
+    await collection.update_one(
+        {"user_id": user_id_str},
+        {"$set": {"data": data}},
+        upsert=True
+    )
+
+# ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
+async def ensure_user_loaded(user_id: int) -> dict:
+    """Проверяет память. Если данных нет, загружает из MongoDB."""
+    if user_id not in user_sessions:
+        user_sessions[user_id] = {}
+    
+    session = user_sessions[user_id]
+    
+    # Если настроек или прогресса нет, загружаем из базы
+    if "settings" not in session or "progress" not in session:
+        user_data = await get_user_data(user_id)
+        session["settings"] = user_data.get("settings", {"audio_enabled": False})
+        session["progress"] = user_data
+        
+    return session
+
 # ─── Админ-панель ─────────────────────────────────────────────
 admin_users: set[int] = set()
 
-# ─── Настройки JSONBin ────────────────────────────────────────
-JSONBIN_BIN_ID = os.getenv("JSONBIN_BIN_ID")
-JSONBIN_API_KEY = os.getenv("JSONBIN_API_KEY")
-JSONBIN_URL = f"https://api.jsonbin.io/v3/b/{JSONBIN_BIN_ID}" if JSONBIN_BIN_ID else ""
-HEADERS = {"X-Master-Key": JSONBIN_API_KEY, "Content-Type": "application/json"} if JSONBIN_API_KEY else {}
 
 # ─── УМНАЯ ЗАГРУЗКА ДАННЫХ (ЛЕНИВАЯ) ────────────────────────
 async def ensure_user_loaded(user_id: int) -> dict:
@@ -59,14 +113,12 @@ async def get_user_settings(user_id: int) -> dict:
 
 
 async def update_user_setting(user_id: int, setting: str, value: any) -> None:
-    data = await load_completed()
-    key = str(user_id)
-    if key not in data:
-        data[key] = {}
-    if "settings" not in data[key]:
-        data[key]["settings"] = {}
-    data[key]["settings"][setting] = value
-    await save_completed(data)
+    """Обновляет одну настройку пользователя."""
+    data = await get_user_data(user_id)
+    if "settings" not in data:
+        data["settings"] = {}
+    data["settings"][setting] = value
+    await save_user_data(user_id, data)
 
 
 # ─── Генерация аудио ──────────────────────────────────────────
@@ -98,75 +150,15 @@ async def send_audio_if_enabled(bot: Bot, chat_id: int, user_id: int, text: str)
 
 # ─── Асинхронные функции для работы с облаком ─────────────────
 
-async def load_completed() -> dict:
-    if not JSONBIN_BIN_ID:
-        logger.warning("JSONBIN_BIN_ID не установлен, загрузка невозможна.")
-        return {}
-    try:
-        logger.info(f"🔄 Загружаем данные из JSONBin: {JSONBIN_BIN_ID}")
-        # ⚡️ ТАЙМАУТ 5 СЕКУНД (1 секунда слишком мало для сети)
-        timeout = aiohttp.ClientTimeout(total=5)
-        
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.get(JSONBIN_URL + "/latest", headers=HEADERS) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
-                    logger.info("✅ Данные успешно загружены из JSONBin!")
-                    return data.get("record", {})
-                else:
-                    logger.error(f"❌ Ошибка загрузки: статус {resp.status}")
-                    return {}
-    except asyncio.TimeoutError:
-        logger.warning("⏱️ JSONBin не отвечает (таймаут 5 сек). Работаем с локальными данными.")
-        return {}
-    except Exception as e:
-        logger.error(f"❌ Исключение при загрузке из JSONBin: {e}")
-        return {}
-
-
-async def save_completed(data: dict) -> None:
-    if not JSONBIN_BIN_ID:
-        logger.error("❌ JSONBIN_BIN_ID не установлен!")
-        return
-    if not JSONBIN_API_KEY:
-        logger.error("❌ JSONBIN_API_KEY не установлен!")
-        return
-    
-    if not data:
-        data = {"_cleared": True}
-    
-    logger.info(f"🔄 Сохраняем данные в JSONBin: {JSONBIN_BIN_ID}")
-    try:
-        # ⚡️ ДОБАВЛЯЕМ ТАЙМАУТ 5 СЕКУНД И СЮДА
-        timeout = aiohttp.ClientTimeout(total=5)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.put(JSONBIN_URL, json=data, headers=HEADERS) as resp:
-                if resp.status == 200:
-                    logger.info("✅ Данные успешно сохранены в JSONBin!")
-                else:
-                    text = await resp.text()
-                    logger.warning(f"⚠️ Ошибка сохранения в JSONBin: {resp.status}. Данные пока только в памяти.")
-    except asyncio.TimeoutError:
-        logger.warning("⏱️ JSONBin не отвечает при сохранении (таймаут 5 сек). Данные сохранены только в памяти.")
-    except Exception as e:
-        logger.error(f"❌ Исключение при сохранении в JSONBin: {e}")
-
-
-async def get_user_results(user_id: int) -> dict:
-    data = await load_completed()
-    return data.get(str(user_id), {})
-
-
 async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, test_type: str = "test") -> None:
-    data = await load_completed()
-    key = str(user_id)
-    if key not in data:
-        data[key] = {}
-    if test_type not in data[key]:
-        data[key][test_type] = {}
+    """Сохраняет результат теста или изучения слов."""
+    data = await get_user_data(user_id)
     
-    if lesson_id not in data[key][test_type]:
-        data[key][test_type][lesson_id] = {
+    if test_type not in data:
+        data[test_type] = {}
+    
+    if lesson_id not in data[test_type]:
+        data[test_type][lesson_id] = {
             "best_score": score,
             "best_total": total,
             "last_score": score,
@@ -175,7 +167,7 @@ async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, t
             "date": datetime.now().strftime("%Y-%m-%d %H:%M"),
         }
     else:
-        record = data[key][test_type][lesson_id]
+        record = data[test_type][lesson_id]
         record["attempts"] = record.get("attempts", 1) + 1
         record["last_score"] = score
         record["last_total"] = total
@@ -187,8 +179,8 @@ async def mark_completed(user_id: int, lesson_id: str, score: int, total: int, t
         if current_percent > best_percent:
             record["best_score"] = score
             record["best_total"] = total
-    
-    await save_completed(data)
+            
+    await save_user_data(user_id, data)
 
 
 # ─── Парсер слов ──────────────────────────────────────────────
@@ -740,6 +732,7 @@ async def start_test(callback: CallbackQuery) -> None:
         "type": "test", "lesson": lesson_id, "question": 0, "score": 0, "shuffled_questions": questions
     })
     
+    
     q = questions[0]
     total = len(questions)
     await callback.message.edit_text(
@@ -1118,31 +1111,31 @@ async def cmd_admin_stats(message: Message) -> None:
         await message.answer("⛔ У вас нет доступа к этой команде.\n\nИспользуйте /setadmin1234 для включения режима администратора.", parse_mode="HTML")
         return
     
-    data = await load_completed()
-    total_users = len([k for k in data.keys() if k != "_cleared"])
+    collection = db.users
+    cursor = collection.find({})
+    total_users = 0
     total_tests_completed = 0
     total_words_completed = 0
     topic_stats = {}
     
-    for uid, user_data in data.items():
-        if uid == "_cleared": continue
+    async for doc in cursor:
+        total_users += 1
+        user_data = doc.get("data", {})
         
         test_results = user_data.get("test", {})
         for lesson_id, record in test_results.items():
-            if lesson_id == "_cleared": continue
             total_tests_completed += record.get("attempts", 1)
             lesson = TESTS.get(lesson_id)
             if lesson:
                 topic_stats[lesson["title"]] = topic_stats.get(lesson["title"], 0) + record.get("attempts", 1)
-        
+                
         words_results = user_data.get("words", {})
         for topic_id, record in words_results.items():
-            if topic_id == "_cleared": continue
             total_words_completed += record.get("attempts", 1)
             topic_data = WORDS.get(topic_id)
             if topic_data:
                 topic_stats[topic_data["title"]] = topic_stats.get(topic_data["title"], 0) + record.get("attempts", 1)
-    
+                
     lines = [
         "👑 <b>Админ-панель</b>\n",
         f"👥 Всего пользователей: <b>{total_users}</b>",
@@ -1157,8 +1150,21 @@ async def cmd_admin_stats(message: Message) -> None:
             lines.append(f"  {i}. {topic_name} — {count} прохождений")
     else:
         lines.append("📊 Статистика по темам пока пуста.")
-    
+        
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+@router.message(Command("reset"))
+async def cmd_reset(message: Message) -> None:
+    user_id = str(message.from_user.id)
+    collection = db.users
+    
+    # Удаляем из базы
+    await collection.delete_one({"user_id": user_id})
+    # Удаляем из памяти
+    if message.from_user.id in user_sessions: 
+        del user_sessions[message.from_user.id]
+        
+    await message.answer("🔄 <b>Ваши результаты успешно сброшены!</b>", parse_mode="HTML")
 
 
 # ─── СЛУЖЕБНЫЕ КОМАНДЫ ───────────────────────────────────────
@@ -1176,22 +1182,6 @@ async def cmd_reset(message: Message) -> None:
     else:
         await message.answer("⚠️ Для этого аккаунта нет сохраненных результатов.", parse_mode="HTML")
 
-@router.message(Command("debug"))
-async def cmd_debug(message: Message) -> None:
-    if JSONBIN_BIN_ID and JSONBIN_API_KEY:
-        await message.answer(f"✅ <b>Ключи найдены!</b>\n\nBin ID: {JSONBIN_BIN_ID[:10]}...\nAPI Key: {JSONBIN_API_KEY[:10]}...", parse_mode="HTML")
-    else:
-        await message.answer("❌ <b>Ключи НЕ найдены!</b>\n\nПроверьте Environment в Render.", parse_mode="HTML")
-
-@router.message(Command("testsave"))
-async def cmd_testsave(message: Message) -> None:
-    logger.info("🚀 ЗАПУЩЕНА КОМАНДА /testsave")
-    await message.answer("⏳ Тестирую сохранение... Смотрите логи Render!")
-    user_id = str(message.from_user.id)
-    test_data = {user_id: {"test": {"test_lesson": {"score": 99, "total": 100, "date": "TEST_MODE"}}}}
-    await save_completed(test_data)
-    logger.info("🏁 КОМАНДА /testsave ЗАВЕРШЕНА")
-    await message.answer("✅ Готово! Проверьте логи Render.")
 
 
 # ─── ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ОШИБОК ───────────────────────────
