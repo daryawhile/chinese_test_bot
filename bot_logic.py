@@ -161,12 +161,12 @@ def parse_word(word_str: str) -> dict:
 def build_main_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📊 Мои результаты", callback_data="show_results")],
-        [InlineKeyboardButton(text="🎴 Слова", callback_data="show_words")],
-        [InlineKeyboardButton(text=" Найти слово", callback_data="search_word")],
+        [InlineKeyboardButton(text="🎴 Слова (тест)", callback_data="show_words")],
+        [InlineKeyboardButton(text="🎴 Найти слово", callback_data="search_word")],
         [InlineKeyboardButton(text="✍️ Порядок черт", callback_data="stroke_order_prompt")],
         [InlineKeyboardButton(text="🔊 Озвучить текст", callback_data="tts_prompt")],
-        [InlineKeyboardButton(text=" Словарь", callback_data="show_dictionary")],
-        [InlineKeyboardButton(text="📝 Тесты", callback_data="show_tests")],
+        [InlineKeyboardButton(text="📝 Словарь", callback_data="show_dictionary")],
+        [InlineKeyboardButton(text="📝 Тут ничего нет", callback_data="show_tests")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
