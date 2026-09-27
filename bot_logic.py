@@ -11,7 +11,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import CommandStart, Command
 from aiogram.exceptions import TelegramBadRequest
 from gtts import gTTS
-from tests_data import TESTS, WORDS
+from tests_data import TESTS, WORDS, DIALOGUES
 from config import BOT_TOKEN
 
 logging.basicConfig(level=logging.INFO)
@@ -190,6 +190,13 @@ def build_dict_menu_keyboard() -> InlineKeyboardMarkup:
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def build_dialogues_keyboard() -> InlineKeyboardMarkup:
+    """Строит клавиатуру со списком уроков для раздела Диалоги."""
+    buttons = [[InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")]]
+    for lesson_id, lesson in DIALOGUES.items():
+        buttons.insert(0, [InlineKeyboardButton(text=lesson["title"], callback_data=f"dialogue_{lesson_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def build_wordtest_menu_keyboard() -> InlineKeyboardMarkup:
     buttons = [
         [InlineKeyboardButton(text="📚 Слова по темам", callback_data="wordtest_topics")],
@@ -268,6 +275,8 @@ async def format_results(user_id: int) -> str:
                 lines.append(f"  ✅ {topic_title}")
                 lines.append(f"     Попыток: {attempts} | Последняя: {date}")
     return "\n".join(lines)
+
+
 
 # ─── Хендлеры: Главное меню ───────────────────────────────────
 @router.message(CommandStart())
@@ -881,19 +890,34 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
     await callback.answer()
 
 
-# ─── Хендлер: Диалоги (заглушка) ─────────────────────────────
 @router.callback_query(F.data == "dialogues_menu")
 async def dialogues_menu(callback: CallbackQuery) -> None:
     await callback.message.edit_text(
-        "💬 <b>Диалоги</b>\n\n"
-        "Этот раздел находится в разработке.\n"
-        "Здесь скоро появятся интерактивные диалоги на китайском языке для практики общения!\n\n"
-        "Следите за обновлениями. 🇨🇳",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
-        ]),
+        "💬 <b>Диалоги</b>\n\nВыберите урок для просмотра диалога:",
+        reply_markup=build_dialogues_keyboard(),
         parse_mode="HTML"
     )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("dialogue_"))
+async def show_dialogue(callback: CallbackQuery) -> None:
+    lesson_id = callback.data.removeprefix("dialogue_")
+    if lesson_id not in DIALOGUES:
+        await callback.answer("Диалог не найден.", show_alert=True)
+        return
+    
+    dialogue_data = DIALOGUES[lesson_id]
+    title = dialogue_data["title"]
+    dialogue_text = dialogue_data["dialogue"]
+    
+    text = f"💬 <b>{title}</b>\n\n{dialogue_text}"
+    
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔙 К списку уроков", callback_data="dialogues_menu")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="back_to_main")]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 
