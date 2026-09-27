@@ -634,12 +634,12 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
 async def handle_test_next(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     next_q = int(parts[-1])
-    lesson_id = "_".join(parts[1:-1])
+    lesson_id = "_".join(parts[2:-1])  # ⚡️ ИСПРАВЛЕНО: было parts[1:-1]
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
     
     if not session or session.get("type") != "test" or session["lesson"] != lesson_id:
-        await callback.answer("⚠️ Сессия не найдена.", show_alert=True)
+        await callback.answer("️ Сессия не найдена.", show_alert=True)
         return
         
     questions = session["shuffled_questions"]
@@ -806,7 +806,7 @@ async def handle_word_answer(callback: CallbackQuery) -> None:
 async def handle_word_next(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     next_q = int(parts[-1])
-    topic_id = "_".join(parts[1:-1])
+    topic_id = "_".join(parts[2:-1])  # ⚡️ ИСПРАВЛЕНО: было parts[1:-1]
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
     
