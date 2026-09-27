@@ -580,10 +580,11 @@ async def start_test(callback: CallbackQuery) -> None:
         return
         
     questions = [q.copy() for q in TESTS[lesson_id]["questions"]]
-    # random.shuffle(questions)
+    # random.shuffle(questions)  # ← УБРАНО: вопросы теперь идут по порядку
+    
     for q in questions:
         options_with_correct = [(opt, i == q["correct"]) for i, opt in enumerate(q["options"])]
-        random.shuffle(options_with_correct)
+        random.shuffle(options_with_correct)  # ← Варианты ответов всё ещё перемешиваются
         q["shuffled_options"] = [opt for opt, _ in options_with_correct]
         q["shuffled_correct"] = next(i for i, (_, is_correct) in enumerate(options_with_correct) if is_correct)
         
