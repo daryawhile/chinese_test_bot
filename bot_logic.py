@@ -936,9 +936,9 @@ async def cmd_set_user(message: Message) -> None:
 @router.message(Command("admin_stats"))
 async def cmd_admin_stats(message: Message) -> None:
     if message.from_user.id not in admin_users:
-        await message.answer(" У вас нет доступа к этой команде.", parse_mode="HTML")
+        await message.answer("⛔ У вас нет доступа к этой команде.", parse_mode="HTML")
         return
-    
+        
     try:
         if db_pool is None:
             await message.answer("⚠️ База данных не подключена.", parse_mode="HTML")
@@ -953,7 +953,14 @@ async def cmd_admin_stats(message: Message) -> None:
         topic_stats = {}
         
         for row in rows:
-            user_data = row['data']
+            raw_data = row['data']
+            
+            # ⚡️ ЗАЩИТА: Если база вернула строку, превращаем её в словарь Python
+            if isinstance(raw_data, str):
+                user_data = json.loads(raw_data)
+            else:
+                user_data = raw_data
+                
             test_results = user_data.get("test", {})
             for lesson_id, record in test_results.items():
                 total_tests_completed += record.get("attempts", 1)
@@ -971,7 +978,7 @@ async def cmd_admin_stats(message: Message) -> None:
         lines = [
             "👑 <b>Админ-панель</b>\n",
             f"👥 Всего пользователей: <b>{total_users}</b>",
-            f" Пройдено тестов: <b>{total_tests_completed}</b>",
+            f"📝 Пройдено тестов: <b>{total_tests_completed}</b>",
             f"🎴 Пройдено тем слов: <b>{total_words_completed}</b>\n",
         ]
         
@@ -987,7 +994,7 @@ async def cmd_admin_stats(message: Message) -> None:
         
     except Exception as e:
         logger.error(f"❌ Ошибка в admin_stats: {e}", exc_info=True)
-        await message.answer(f"⚠️ Произошла ошибка при получении статистики.", parse_mode="HTML")
+        await message.answer("⚠️ Произошла ошибка при получении статистики.", parse_mode="HTML")
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
