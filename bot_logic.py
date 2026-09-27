@@ -571,7 +571,7 @@ async def handle_text_input(message: Message) -> None:
         await message.answer("\n".join(lines), reply_markup=kb, parse_mode="HTML")
 
 # ─── Хендлеры: ТЕСТЫ (вставить слово) ────────────────────────
-@router.callback_query(F.data.startswith("test_"))
+@router.callback_query(F.data.startswith("test_lesson_"))
 async def start_test(callback: CallbackQuery) -> None:
     lesson_id = callback.data.removeprefix("test_")
     user_id = callback.from_user.id
@@ -580,11 +580,10 @@ async def start_test(callback: CallbackQuery) -> None:
         return
         
     questions = [q.copy() for q in TESTS[lesson_id]["questions"]]
-    # random.shuffle(questions)  # ← УБРАНО: вопросы теперь идут по порядку
-    
+    random.shuffle(questions)
     for q in questions:
         options_with_correct = [(opt, i == q["correct"]) for i, opt in enumerate(q["options"])]
-        random.shuffle(options_with_correct)  # ← Варианты ответов всё ещё перемешиваются
+        random.shuffle(options_with_correct)
         q["shuffled_options"] = [opt for opt, _ in options_with_correct]
         q["shuffled_correct"] = next(i for i, (_, is_correct) in enumerate(options_with_correct) if is_correct)
         
@@ -600,7 +599,7 @@ async def start_test(callback: CallbackQuery) -> None:
 async def handle_test_answer(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     option_index, q_index = int(parts[-1]), int(parts[-2])
-    lesson_id = "_".join(parts[2:-1])
+    lesson_id = "_".join(parts[1:-2])
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
     
@@ -624,7 +623,7 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
         
     next_q = q_index + 1
     if next_q < total:
-        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="️ Следующий вопрос", callback_data=f"test_next_{lesson_id}_{next_q}")]])
+        kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data=f"test_next_{lesson_id}_{next_q}")]])
         await callback.message.edit_text(f"{feedback}\n\n💡 <b>Правильный ответ:</b>\n{correct_answer_text}", reply_markup=kb, parse_mode="HTML")
     else:
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=" Показать результаты", callback_data=f"test_finish_{lesson_id}")]])
@@ -635,12 +634,12 @@ async def handle_test_answer(callback: CallbackQuery) -> None:
 async def handle_test_next(callback: CallbackQuery) -> None:
     parts = callback.data.split("_")
     next_q = int(parts[-1])
-    lesson_id = "_".join(parts[2:-1])  # ⚡️ ИСПРАВЛЕНО: было parts[1:-1]
+    lesson_id = "_".join(parts[2:-1])
     user_id = callback.from_user.id
     session = user_sessions.get(user_id)
     
     if not session or session.get("type") != "test" or session["lesson"] != lesson_id:
-        await callback.answer("️ Сессия не найдена.", show_alert=True)
+        await callback.answer("⚠️ Сессия не найдена.", show_alert=True)
         return
         
     questions = session["shuffled_questions"]
@@ -667,7 +666,7 @@ async def handle_test_finish(callback: CallbackQuery) -> None:
     
     if not session or session.get("type") != "test":
         logger.warning(f"⚠️ Сессия не найдена. Текущая сессия: {session}")
-        await callback.answer("️ Сессия не найдена. Начните тест заново.", show_alert=True)
+        await callback.answer("⚠️ Сессия не найдена. Начните тест заново.", show_alert=True)
         return
         
     score = session.get("score", 0)
@@ -690,6 +689,8 @@ async def handle_test_finish(callback: CallbackQuery) -> None:
             
     percent = round(score / total * 100) if total > 0 else 0
     emoji = "🏆" if percent == 100 else "🎉" if percent >= 75 else "👍" if percent >= 50 else "📚"
+    
+    # ⚡️ БЕЗОПАСНОЕ получение названия, чтобы избежать скрытых ошибок
     lesson_title = TESTS.get(lesson_id, {}).get("title", "Неизвестный тест")
     text_to_send = f"{emoji} <b>Тест завершён!</b>\n\n📖 {lesson_title}\n📊 Результат: <b>{score}/{total}</b> ({percent}%)"
     
