@@ -938,42 +938,56 @@ async def cmd_admin_stats(message: Message) -> None:
     if message.from_user.id not in admin_users:
         await message.answer(" У вас нет доступа к этой команде.", parse_mode="HTML")
         return
-        
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch('SELECT data FROM users')
-        
-    total_users = len(rows)
-    total_tests_completed = 0
-    total_words_completed = 0
-    topic_stats = {}
     
-    for row in rows:
-        user_data = row['data']
-        test_results = user_data.get("test", {})
-        for lesson_id, record in test_results.items():
-            total_tests_completed += record.get("attempts", 1)
-            lesson = TESTS.get(lesson_id)
-            if lesson:
-                topic_stats[lesson["title"]] = topic_stats.get(lesson["title"], 0) + record.get("attempts", 1)
-                
-        words_results = user_data.get("words", {})
-        for topic_id, record in words_results.items():
-            total_words_completed += record.get("attempts", 1)
-            topic_data = WORDS.get(topic_id)
-            if topic_data:
-                topic_stats[topic_data["title"]] = topic_stats.get(topic_data["title"], 0) + record.get("attempts", 1)
-                
-    lines = ["👑 <b>Админ-панель</b>\n", f"👥 Всего пользователей: <b>{total_users}</b>", f"📝 Пройдено тестов: <b>{total_tests_completed}</b>", f"🎴 Пройдено тем слов: <b>{total_words_completed}</b>\n"]
-    
-    if topic_stats:
-        lines.append("🔥 <b>Топ-5 популярных тем:</b>")
-        sorted_topics = sorted(topic_stats.items(), key=lambda x: x[1], reverse=True)[:5]
-        for i, (topic_name, count) in enumerate(sorted_topics, 1):
-            lines.append(f"  {i}. {topic_name} — {count} прохождений")
-    else:
-        lines.append("📊 Статистика по темам пока пуста.")
+    try:
+        if db_pool is None:
+            await message.answer("⚠️ База данных не подключена.", parse_mode="HTML")
+            return
+            
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch('SELECT data FROM users')
+            
+        total_users = len(rows)
+        total_tests_completed = 0
+        total_words_completed = 0
+        topic_stats = {}
         
-    await message.answer("\n".join(lines), parse_mode="HTML")
+        for row in rows:
+            user_data = row['data']
+            test_results = user_data.get("test", {})
+            for lesson_id, record in test_results.items():
+                total_tests_completed += record.get("attempts", 1)
+                lesson = TESTS.get(lesson_id)
+                if lesson:
+                    topic_stats[lesson["title"]] = topic_stats.get(lesson["title"], 0) + record.get("attempts", 1)
+                    
+            words_results = user_data.get("words", {})
+            for topic_id, record in words_results.items():
+                total_words_completed += record.get("attempts", 1)
+                topic_data = WORDS.get(topic_id)
+                if topic_data:
+                    topic_stats[topic_data["title"]] = topic_stats.get(topic_data["title"], 0) + record.get("attempts", 1)
+                    
+        lines = [
+            "👑 <b>Админ-панель</b>\n",
+            f"👥 Всего пользователей: <b>{total_users}</b>",
+            f" Пройдено тестов: <b>{total_tests_completed}</b>",
+            f"🎴 Пройдено тем слов: <b>{total_words_completed}</b>\n",
+        ]
+        
+        if topic_stats:
+            lines.append("🔥 <b>Топ-5 популярных тем:</b>")
+            sorted_topics = sorted(topic_stats.items(), key=lambda x: x[1], reverse=True)[:5]
+            for i, (topic_name, count) in enumerate(sorted_topics, 1):
+                lines.append(f"  {i}. {topic_name} — {count} прохождений")
+        else:
+            lines.append("📊 Статистика по темам пока пуста.")
+            
+        await message.answer("\n".join(lines), parse_mode="HTML")
+        
+    except Exception as e:
+        logger.error(f"❌ Ошибка в admin_stats: {e}", exc_info=True)
+        await message.answer(f"⚠️ Произошла ошибка при получении статистики.", parse_mode="HTML")
 
 @router.message(Command("reset"))
 async def cmd_reset(message: Message) -> None:
