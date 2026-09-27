@@ -162,9 +162,15 @@ def _get_radical_topics():
     """Возвращает список ID тем с ключами Канси."""
     return [tid for tid in WORDS.keys() if tid in ("keys_kangxi", "radicals_26_50")]
 
+def _get_dict_topics():
+    """Возвращает список ID тем для раздела 'Слова по словарю'."""
+    # Сюда впишите ID тем из tests_data.py, которые должны быть в этом разделе.
+    # Пока там только "greetings", но вы можете добавить сколько угодно через запятую.
+    return ["greetings"] 
+
 def build_main_keyboard() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text=" Мои результаты", callback_data="show_results")],
+        [InlineKeyboardButton(text="🏆 Мои результаты", callback_data="show_results")],
         [InlineKeyboardButton(text="📖 Словарь", callback_data="dict_menu")],
         [InlineKeyboardButton(text="📝 Тест по словам", callback_data="wordtest_menu")],
         [InlineKeyboardButton(text="📝 Тесты (вставить слово)", callback_data="tests_menu")],
@@ -315,8 +321,9 @@ async def dict_topics(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "dict_glossary")
 async def dict_glossary(callback: CallbackQuery) -> None:
-    # Перенаправляем на отображение темы greetings
-    await show_dict_lesson_for_topic(callback, "greetings")
+    topic_ids = _get_dict_topics()
+    kb = build_topic_list_keyboard("dict", topic_ids, "dict_menu")
+    await callback.message.edit_text("📖 <b>Слова по словарю</b>\n\nВыберите тему:", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "dict_radicals")
@@ -366,7 +373,9 @@ async def wordtest_topics(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data == "wordtest_glossary")
 async def wordtest_glossary(callback: CallbackQuery) -> None:
-    await start_words_for_topic(callback, "greetings")
+    topic_ids = _get_dict_topics()
+    kb = build_topic_list_keyboard("words", topic_ids, "wordtest_menu")
+    await callback.message.edit_text("📖 <b>Слова по словарю</b>\n\nВыберите тему для теста:", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
 
 @router.callback_query(F.data == "wordtest_radicals")
