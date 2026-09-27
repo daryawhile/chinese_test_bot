@@ -169,14 +169,15 @@ def _get_dict_topics() -> list[str]:
 
 def build_main_keyboard() -> InlineKeyboardMarkup:
     buttons = [
-        [InlineKeyboardButton(text="🏆 Мои результаты", callback_data="show_results")],
         [InlineKeyboardButton(text="📖 Словарь", callback_data="dict_menu")],
-        [InlineKeyboardButton(text="📝 Тест по словам", callback_data="wordtest_menu")],
+        [InlineKeyboardButton(text="📝 Тесты к словарю", callback_data="wordtest_menu")],
+        [InlineKeyboardButton(text="💬 Диалоги", callback_data="dialogues_menu")],
         [InlineKeyboardButton(text="📝 Тесты (вставить слово)", callback_data="tests_menu")],
         [InlineKeyboardButton(text="🔍 Найти слово", callback_data="search_word")],
         [InlineKeyboardButton(text="✍️ Порядок черт", callback_data="stroke_order_prompt")],
         [InlineKeyboardButton(text="🔊 Озвучить текст", callback_data="tts_prompt")],
-        [InlineKeyboardButton(text="⚙️ Настройки", callback_data="show_settings")],
+        [InlineKeyboardButton(text="🏆 Мои результаты", callback_data="show_results")],
+        [InlineKeyboardButton(text="⚙️ Настройки аудио", callback_data="show_settings")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -876,6 +877,24 @@ async def handle_word_finish(callback: CallbackQuery) -> None:
         await callback.answer("⚠️ Произошла ошибка при показе результатов.", show_alert=True)
         
     await callback.answer()
+
+
+# ─── Хендлер: Диалоги (заглушка) ─────────────────────────────
+@router.callback_query(F.data == "dialogues_menu")
+async def dialogues_menu(callback: CallbackQuery) -> None:
+    await callback.message.edit_text(
+        "💬 <b>Диалоги</b>\n\n"
+        "Этот раздел находится в разработке.\n"
+        "Здесь скоро появятся интерактивные диалоги на китайском языке для практики общения!\n\n"
+        "Следите за обновлениями. 🇨🇳",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔙 В главное меню", callback_data="back_to_main")]
+        ]),
+        parse_mode="HTML"
+    )
+    await callback.answer()
+
+
 
 # ─── АДМИН-ПАНЕЛЬ ────────────────────────────────────────────
 @router.message(Command("setadmin1234"))
