@@ -580,7 +580,7 @@ async def start_test(callback: CallbackQuery) -> None:
         return
         
     questions = [q.copy() for q in TESTS[lesson_id]["questions"]]
-    random.shuffle(questions)
+    # random.shuffle(questions)
     for q in questions:
         options_with_correct = [(opt, i == q["correct"]) for i, opt in enumerate(q["options"])]
         random.shuffle(options_with_correct)
