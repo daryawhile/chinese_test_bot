@@ -154,19 +154,18 @@ def parse_word(word_str: str) -> dict:
 
 # ─── Вспомогательные функции для меню ─────────────────────────
 
-def _get_lesson_topics():
-    """Возвращает список ID тем-уроков (lesson_*)."""
+# ─── АВТОМАТИЧЕСКАЯ КАТЕГОРИЗАЦИЯ ТЕМ ───────────────────────
+def _get_lesson_topics() -> list[str]:
+    """Все темы с префиксом lesson_ → 'Слова по темам'."""
     return [tid for tid in WORDS.keys() if tid.startswith("lesson_")]
 
-def _get_radical_topics():
-    """Возвращает список ID тем с ключами Канси."""
-    return [tid for tid in WORDS.keys() if tid in ("keys_kangxi", "radicals_26_50")]
+def _get_radical_topics() -> list[str]:
+    """Все темы с префиксом radicals_ → 'Ключи Канси'."""
+    return [tid for tid in WORDS.keys() if tid.startswith("radicals_")]
 
-def _get_dict_topics():
-    """Возвращает список ID тем для раздела 'Слова по словарю'."""
-    # Сюда впишите ID тем из tests_data.py, которые должны быть в этом разделе.
-    # Пока там только "greetings", но вы можете добавить сколько угодно через запятую.
-    return ["greetings"] 
+def _get_dict_topics() -> list[str]:
+    """Все темы с префиксом words_ → 'Слова по словарю'."""
+    return [tid for tid in WORDS.keys() if tid.startswith("words_")]
 
 def build_main_keyboard() -> InlineKeyboardMarkup:
     buttons = [
