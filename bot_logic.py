@@ -194,7 +194,6 @@ def build_wordtest_menu_keyboard() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📚 Слова по темам", callback_data="wordtest_topics")],
         [InlineKeyboardButton(text="📖 Слова по словарю", callback_data="wordtest_glossary")],
         [InlineKeyboardButton(text="🔑 Ключи Канси", callback_data="wordtest_radicals")],
-        [InlineKeyboardButton(text="💬 Диалоги (скоро)", callback_data="wordtest_dialogues")],
         [InlineKeyboardButton(text="🔙 Назад", callback_data="back_to_main")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -383,10 +382,6 @@ async def wordtest_radicals(callback: CallbackQuery) -> None:
     kb = build_topic_list_keyboard("words", topic_ids, "wordtest_menu")
     await callback.message.edit_text("🔑 <b>Ключи Канси</b>\n\nВыберите набор для теста:", reply_markup=kb, parse_mode="HTML")
     await callback.answer()
-
-@router.callback_query(F.data == "wordtest_dialogues")
-async def wordtest_dialogues(callback: CallbackQuery) -> None:
-    await callback.answer("💬 Раздел «Диалоги» скоро будет доступен!", show_alert=True)
 
 # ─── Подменю: Тесты (вставить слово) ────────────────────────
 @router.callback_query(F.data == "tests_menu")
